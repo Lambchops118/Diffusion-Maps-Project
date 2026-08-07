@@ -1,0 +1,29 @@
+# Configuration for the double-well diffusion-map experiment.
+# Command-line arguments to run_experiment.py override any value set here.
+
+# ---- Simulation (Euler--Maruyama for dX = (X - X^3) dt + sigma dW) ----
+n_samples: 3000        # number of time samples (including initial condition)
+dt: 0.01               # integration time step
+process_noise: 0.7     # SDE diffusion coefficient sigma
+x0: -1.0               # initial condition X[0]
+seed: 42               # simulation RNG seed
+
+# ---- High-dimensional observation model ----
+output_dim: 15         # observation-space dimension (10-20 recommended)
+measurement_noise: 0.1 # std. dev. of additive Gaussian measurement noise
+include_extra_features: true  # append tanh(x), exp(-x^2)
+observation_seed: 123  # seed for the random linear lift + measurement noise
+
+# ---- Diffusion map ----
+epsilon: auto          # 'auto' (percentile heuristic) or a positive float
+epsilon_percentile: 50 # percentile of nonzero sq. distances (50 = median)
+alpha: 1.0             # anisotropic normalization exponent (0, 0.5, or 1)
+n_components: 5        # number of nontrivial diffusion coordinates
+diffusion_time: 1.0    # diffusion time t (coords scaled by lambda_k^t)
+
+# ---- Sensitivity studies ----
+noise_levels: [0.0, 0.05, 0.10, 0.20]  # measurement-noise study
+epsilon_multipliers: [0.5, 1.0, 2.0]   # bandwidth study (x default epsilon)
+
+# ---- Output ----
+output_dir: outputs

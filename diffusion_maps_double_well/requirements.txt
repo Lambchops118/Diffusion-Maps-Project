@@ -1,0 +1,10 @@
+# Core scientific stack for the double-well diffusion-map project.
+# Tested with Python 3.11+ (also runs on 3.9+). Pinned to minimum
+# versions known to work; newer releases are generally fine.
+numpy>=1.24
+scipy>=1.10
+pandas>=2.0
+scikit-learn>=1.2
+matplotlib>=3.7
+PyYAML>=6.0
+pytest>=7.0
