@@ -23,7 +23,7 @@ Outputs
 -------
 * ``outputs/data/``    -- latent state, observations, features (``.npy`` + CSV);
 * ``outputs/metrics/`` -- combined metrics CSV, per-study CSVs, run params JSON;
-* ``outputs/figures/`` -- the ten required 300-DPI PNG figures.
+* ``outputs/figures/`` -- seventeen 300-DPI PNG figures.
 
 All paths are relative to the project directory; missing directories are
 created automatically.
@@ -49,7 +49,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.experiments import (  # noqa: E402
     ExperimentConfig,
     generate_all_figures,
-    run_epsilon_study,
+    run_alpha_study,
+    run_bandwidth_study,
+    run_barrier_study,
     run_noise_study,
     run_pipeline,
 )
@@ -79,6 +81,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--x0", type=float, default=None, help="Initial condition X[0].")
     parser.add_argument("--seed", type=int, default=None, help="Simulation random seed.")
+    parser.add_argument(
+        "--subsample",
+        type=int,
+        default=None,
+        help="Keep every k-th integration step (buys horizon without cost).",
+    )
+    parser.add_argument(
+        "--feature-map",
+        type=str,
+        default=None,
+        choices=["polynomial", "rbf"],
+        help="Default observation model for single-model runs.",
+    )
     # Observations
     parser.add_argument(
         "--output-dim", type=int, default=None, help="Observation-space dimension (10-20)."
@@ -97,7 +112,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--epsilon",
         type=str,
         default=None,
-        help="Kernel bandwidth: a positive float or 'auto'.",
+        help="Kernel bandwidth: a positive float, 'scan', or 'auto'.",
     )
     parser.add_argument(
         "--epsilon-percentile",
@@ -134,11 +149,11 @@ def load_yaml_config(path: Path) -> dict:
 
 
 def _coerce_epsilon(value: str | float) -> float | str:
-    """Interpret the epsilon argument: 'auto' or a positive float."""
+    """Interpret the epsilon argument: 'scan', 'auto', or a positive float."""
 
     if isinstance(value, str):
-        if value.strip().lower() == "auto":
-            return "auto"
+        if value.strip().lower() in ("auto", "scan"):
+            return value.strip().lower()
         try:
             return float(value)
         except ValueError as exc:
@@ -165,6 +180,8 @@ def build_config(args: argparse.Namespace) -> ExperimentConfig:
     cli_overrides = {
         "n_samples": args.n_samples,
         "dt": args.dt,
+        "subsample": args.subsample,
+        "feature_map": args.feature_map,
         "process_noise": args.process_noise,
         "x0": args.x0,
         "seed": args.seed,
@@ -183,7 +200,13 @@ def build_config(args: argparse.Namespace) -> ExperimentConfig:
             merged[key] = value
 
     # Coerce list-like fields to tuples.
-    for key in ("noise_levels", "epsilon_multipliers"):
+    for key in (
+        "feature_maps",
+        "alpha_levels",
+        "noise_levels",
+        "bandwidth_multipliers",
+        "barrier_sigmas",
+    ):
         if isinstance(merged.get(key), list):
             merged[key] = tuple(merged[key])
 
@@ -211,18 +234,25 @@ def save_data_arrays(artifacts, data_dir: Path) -> None:
 
     data_dir.mkdir(parents=True, exist_ok=True)
     np.save(data_dir / "latent_state.npy", artifacts.x)
+    np.save(data_dir / "latent_state_full.npy", artifacts.x_full)
     np.save(data_dir / "time.npy", artifacts.t)
-    np.save(data_dir / "observations.npy", artifacts.observations)
-    np.save(data_dir / "features.npy", artifacts.features)
 
-    # Human-readable CSVs too.
     pd.DataFrame({"time": artifacts.t, "latent_state": artifacts.x}).to_csv(
         data_dir / "latent_state.csv", index=False
     )
-    obs_cols = [f"obs_{i}" for i in range(artifacts.observations.shape[1])]
-    pd.DataFrame(artifacts.observations, columns=obs_cols).to_csv(
-        data_dir / "observations.csv", index=False
-    )
+
+    for name, model in artifacts.models.items():
+        tag = "poly" if name == "polynomial" else "rbf"
+        np.save(data_dir / f"observations_{tag}.npy", model.observations)
+        np.save(data_dir / f"features_{tag}.npy", model.features)
+        np.save(
+            data_dir / f"dm_coordinates_{tag}.npy", model.dm_result.coordinates
+        )
+        np.save(data_dir / f"pca_scores_{tag}.npy", model.pca_scores)
+        obs_cols = [f"obs_{i}" for i in range(model.observations.shape[1])]
+        pd.DataFrame(model.observations, columns=obs_cols).to_csv(
+            data_dir / f"observations_{tag}.csv", index=False
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -238,81 +268,111 @@ def main(argv: list[str] | None = None) -> int:
     for d in (figures_dir, data_dir, metrics_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    print("=" * 70)
+    sim_cfg = config.simulation_config()
+    print("=" * 74)
     print("Double-well diffusion-map experiment")
-    print("=" * 70)
-    print(f"  n_samples         = {config.n_samples}")
-    print(f"  dt                = {config.dt}")
+    print("=" * 74)
+    print(f"  n_samples (kept)  = {config.n_samples}")
+    print(f"  dt / subsample    = {config.dt} / {config.subsample}")
+    print(f"  horizon T         = {sim_cfg.horizon:.1f}")
     print(f"  process_noise     = {config.process_noise}")
     print(f"  output_dim        = {config.output_dim}")
     print(f"  measurement_noise = {config.measurement_noise}")
     print(f"  epsilon           = {config.epsilon}")
     print(f"  alpha             = {config.alpha}")
+    print(f"  feature maps      = {', '.join(config.feature_maps)}")
     print(f"  seed              = {config.seed}")
-    print("-" * 70)
+    print("-" * 74)
 
     # 1. Default pipeline ----------------------------------------------------
-    print("[1/5] Running default pipeline (simulate -> observe -> DM + PCA) ...")
+    print("[1/7] Default pipeline (simulate -> observe -> DM + PCA) ...")
     artifacts = run_pipeline(config)
     print(
-        f"      simulated {config.n_samples} steps, "
-        f"{artifacts.n_transitions} well transitions, "
-        f"default epsilon = {artifacts.default_epsilon:.4g}"
+        f"      T={artifacts.horizon:.0f}  Kramers escape time="
+        f"{artifacts.kramers_time:.1f}  "
+        f"T/tau={artifacts.horizon / artifacts.kramers_time:.1f}"
     )
-    if artifacts.n_transitions < 2:
+    print(
+        f"      {artifacts.n_transitions} committed transitions "
+        f"({artifacts.n_sign_changes} raw sign changes), "
+        f"right-well occupancy={artifacts.occupancy_right:.3f}, "
+        f"2-cluster score(X)={artifacts.two_cluster_x:.3f}"
+    )
+    if artifacts.n_transitions < 10:
         print(
-            "[warn] Fewer than 2 well transitions observed. Consider raising "
-            "--process-noise or --n-samples so both wells are visited."
+            "[warn] Fewer than 10 committed transitions: dynamical statistics "
+            "will be poorly resolved. Raise --subsample or --n-samples."
+        )
+    for name, model in artifacts.models.items():
+        print(
+            f"      [{name}] eps_scan={model.epsilon_scan:.4g} "
+            f"(MST scale={model.epsilon_mst_scale:.4g}, "
+            f"median={model.epsilon_median:.4g}, "
+            f"dim~{2 * model.scan_slope:.2f})  "
+            f"PCA EVR1={model.pca_evr[0]:.3f}"
         )
 
-    # 2. Sensitivity studies -------------------------------------------------
-    print("[2/5] Measurement-noise sensitivity study ...")
-    noise_df = run_noise_study(config)
-    print("[3/5] Kernel-bandwidth sensitivity study ...")
-    epsilon_df = run_epsilon_study(
-        config, artifacts.default_epsilon, artifacts.observations, artifacts.x
-    )
+    # 2-5. Studies -----------------------------------------------------------
+    print("[2/7] Normalization (alpha) study ...")
+    alpha_df = run_alpha_study(config, artifacts)
+    print("[3/7] Kernel-bandwidth study ...")
+    bandwidth_df = run_bandwidth_study(config, artifacts)
+    print("[4/7] Measurement-noise study ...")
+    noise_df = run_noise_study(config, artifacts)
+    print("[5/7] Barrier-depth study ...")
+    barrier_df = run_barrier_study(config)
 
-    # 3. Combined metrics ----------------------------------------------------
-    noise_df_tagged = noise_df.copy()
-    noise_df_tagged.insert(0, "study", "measurement_noise")
-    epsilon_df_tagged = epsilon_df.copy()
-    epsilon_df_tagged.insert(0, "study", "epsilon")
-    combined = pd.concat([noise_df_tagged, epsilon_df_tagged], ignore_index=True)
-
-    noise_df.to_csv(metrics_dir / "noise_study.csv", index=False)
-    epsilon_df.to_csv(metrics_dir / "epsilon_study.csv", index=False)
+    # 6. Persist -------------------------------------------------------------
+    print("[6/7] Saving metrics, data arrays, and run parameters ...")
+    tagged = []
+    for label, frame in (
+        ("alpha", alpha_df),
+        ("bandwidth", bandwidth_df),
+        ("measurement_noise", noise_df),
+        ("barrier", barrier_df),
+    ):
+        frame.to_csv(metrics_dir / f"{label}_study.csv", index=False)
+        copy = frame.copy()
+        copy.insert(0, "study", label)
+        tagged.append(copy)
+    combined = pd.concat(tagged, ignore_index=True)
     combined.to_csv(metrics_dir / "combined_metrics.csv", index=False)
     print(f"      wrote combined metrics ({len(combined)} rows).")
 
-    # 4. Persist data + parameters ------------------------------------------
-    print("[4/5] Saving data arrays and run parameters ...")
     save_data_arrays(artifacts, data_dir)
     save_run_parameters(config, metrics_dir / "run_parameters.json")
 
-    # 5. Figures -------------------------------------------------------------
-    print("[5/5] Generating figures ...")
-    figure_paths = generate_all_figures(artifacts, noise_df, epsilon_df, figures_dir)
+    # 7. Figures -------------------------------------------------------------
+    print("[7/7] Generating figures ...")
+    figure_paths = generate_all_figures(
+        artifacts, alpha_df, bandwidth_df, noise_df, barrier_df, figures_dir
+    )
     for p in figure_paths:
         print(f"      figure: {p.relative_to(PROJECT_ROOT)}")
 
-    # Quick summary of the headline default-setting result.
-    default_noise_row = noise_df.loc[
-        (noise_df["measurement_noise"] - config.measurement_noise).abs().idxmin()
-    ]
-    print("-" * 70)
-    print("Headline result (at default measurement noise):")
-    print(
-        f"  Diffusion map : |Pearson|={default_noise_row['dm_pearson']:.3f}  "
-        f"|Spearman|={default_noise_row['dm_spearman']:.3f}  "
-        f"well acc.={default_noise_row['dm_well_score']:.3f}"
-    )
-    print(
-        f"  PCA           : |Pearson|={default_noise_row['pca_pearson']:.3f}  "
-        f"|Spearman|={default_noise_row['pca_spearman']:.3f}  "
-        f"well acc.={default_noise_row['pca_well_score']:.3f}"
-    )
-    print("=" * 70)
+    # Headline summary -------------------------------------------------------
+    print("-" * 74)
+    print("Headline results")
+    print("-" * 74)
+    print(f"{'model':<12}{'method':<16}{'|rho(X)|':>10}{'|r(signX)|':>12}"
+          f"{'2-clust':>9}{'well acc':>10}")
+    for name in config.feature_maps:
+        sub = alpha_df[alpha_df["feature_map"] == name]
+        pca = sub.iloc[0]
+        print(f"{name:<12}{'PCA':<16}{pca['pca_spearman']:>10.4f}"
+              f"{pca['pca_metastability']:>12.4f}"
+              f"{pca['pca_two_cluster']:>9.3f}{pca['pca_well_score']:>10.4f}")
+        for alpha in (0.5, 1.0):
+            r = sub[np.isclose(sub["alpha"], alpha)]
+            if r.empty:
+                continue
+            r = r.iloc[0]
+            print(f"{'':<12}{f'DM alpha={alpha}':<16}{r['dm_spearman']:>10.4f}"
+                  f"{r['dm_metastability']:>12.4f}"
+                  f"{r['dm_two_cluster']:>9.3f}{r['dm_well_score']:>10.4f}")
+    print(f"\n  reference: 2-cluster variance score of X = "
+          f"{artifacts.two_cluster_x:.3f}")
+    print("=" * 74)
     print("Done. See the 'outputs/' directory for figures, data, and metrics.")
     return 0
 

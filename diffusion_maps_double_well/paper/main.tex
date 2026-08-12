@@ -1,0 +1,1691 @@
+% =============================================================================
+%  Geometry or Dynamics? What Diffusion Maps Recover from a Stochastic
+%  Double-Well System
+%
+%  Build:   pdflatex main
+%           bibtex  main
+%           pdflatex main
+%           pdflatex main
+%
+%  Figures are read from ../outputs/figures/ (see \graphicspath below), so the
+%  experiment must have been run at least once (python run_experiment.py).
+% =============================================================================
+
+\documentclass[11pt]{article}
+
+\usepackage[letterpaper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[round]{natbib}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,
+            urlcolor=blue!50!black]{hyperref}
+\usepackage{url}
+
+\graphicspath{{../outputs/figures/}{figures/}}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\eps}{\varepsilon}
+\newcommand{\Kt}{\widetilde{K}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\Var}{Var}
+
+\title{\bf Geometry or Dynamics? What Diffusion Maps Recover\\
+from a Stochastic Double-Well System}
+
+\author{A.\ L.\ Jackson}
+
+\date{\today}
+
+\begin{document}
+\maketitle
+
+% =============================================================================
+\begin{abstract}
+% =============================================================================
+Diffusion maps are routinely used to extract slow reaction coordinates from
+high-dimensional observations of stochastic systems. We ask, on a problem where
+the ground truth is known exactly, what they actually recover. The hidden state
+is the overdamped Langevin dynamics of a particle in a symmetric quartic double
+well, $\dd X_t = (X_t - X_t^3)\dd t + \sigma\dd W_t$, integrated by
+Euler--Maruyama over $T = 600$ time units --- about $49$ Kramers escape times,
+yielding $61$ committed barrier crossings --- and subsampled in time to $N=3000$
+points so that a dense $O(N^2)$ kernel remains affordable. Two observation models
+lift the scalar state into $\R^{15}$ through a random Gaussian map with additive
+noise: a \emph{polynomial} map whose image is a gently bent arc, and an
+\emph{RBF sensor-array} map whose image is strongly curved.
+
+Two findings separate cleanly. First, on the question of \emph{state recovery},
+the diffusion map decisively beats PCA where the manifold is curved and ties
+where it is not: on the RBF observations
+$\lvert\rho_{\mathrm{Spearman}}\rvert = 0.9998$ against PCA's $0.6624$ (PC$_1$
+is a non-monotone hump that confuses $X \approx -0.3$ with $X \approx 1.5$),
+while on the polynomial observations both reach $0.9997$. The advantage is not
+free: it survives only at small bandwidth, and as $\eps$ grows the diffusion map
+degrades monotonically \emph{onto} the PCA baseline ($0.9998 \to 0.654$ over a
+$128\times$ sweep), which explains why a median-distance bandwidth heuristic
+makes the two methods look identical.
+
+Second, on the question of \emph{metastability}, the normalization controls how
+strongly the sampling density influences the answer, while the observation
+geometry controls how much that matters. Sweeping $\alpha$ leaves state recovery
+untouched ($\lvert\rho\rvert = 0.9998$ throughout) while polynomial-model well
+accuracy falls from $0.9960$ at $\alpha=0$ to $0.5804$ --- poor, though still
+above the $0.5$ chance baseline --- at $\alpha=1$. On the RBF model the wells are
+already separated geometrically, so the effect is much weaker. The spectra also
+separate density-sensitive and density-free regimes: at $\alpha=1$ the RBF gap
+ratios sit near $(4,9)$, the $k^2$ law of the Laplace--Beltrami operator on an
+interval, while at $\alpha=1/2$ the leading gap grows as the physical barrier is
+deepened. Because the nonlinear observation map changes the metric, the latter
+is a dynamics-informed proxy rather than an exact estimate of the SDE generator.
+
+We also report a metric failure worth guarding against: at very small bandwidth
+the kernel becomes nearly reducible, and the resulting eigenvector --- effectively
+a two-point component indicator, constant elsewhere to within $4\times10^{-8}$ ---
+still returns $\lvert\rho_{\mathrm{Spearman}}\rvert = 0.9997$. Rank correlation is
+scale-free and cannot tell that the ordering lies eight orders of magnitude below
+the coordinate's full range. We use a conservative MST-scale-constrained
+bandwidth scan and diagnostics for near-unit eigenvalues and coordinate collapse.
+The practical rule is to choose $\alpha$ from the question, inspect the spectrum,
+and never read a diffusion-map score without checking kernel conditioning.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% =============================================================================
+\section{Introduction}
+% =============================================================================
+
+\subsection{Problem statement}
+
+A recurring situation in the physical sciences is that a system's essential
+behavior is governed by a small number of slow degrees of freedom, while the
+data actually collected are numerous, indirect, and entangled. A protein folds
+along what is effectively one or two reaction coordinates, but the experiment
+returns thousands of atomic positions. A climate oscillation is
+low-dimensional, but the observations are gridded fields. The scientific task is
+inverse: given the high-dimensional measurements alone, and no knowledge of the
+map that produced them, recover the underlying slow variable.
+
+We study that task where the ground truth is known exactly, so recovery can be
+measured rather than asserted. The hidden state is the position $X_t \in \R$ of
+an overdamped Brownian particle in a symmetric quartic double-well potential ---
+the canonical minimal model of a two-state system with rare transitions. The
+observations are produced by a deliberately obstructive pipeline: a nonlinear
+feature map, a random linear lift into $\R^{15}$, additive Gaussian noise, and
+column standardization, so that no measured coordinate is recognizably $X$.
+
+Two questions are asked, and it matters that they are distinct:
+
+\begin{quote}
+\textbf{Q1 (geometry).} Can an unsupervised manifold-learning method recover the
+hidden scalar state from the high-dimensional encoding, and does it do so better
+than a linear method?
+
+\textbf{Q2 (dynamics).} Does the leading coordinate recover the \emph{slow}
+variable --- the one tracking which well the system occupies --- so that the two
+metastable states are separated?
+\end{quote}
+
+The pre-registered hypothesis was that both would be answered affirmatively by
+the same object, the leading nontrivial diffusion coordinate, because diffusion
+maps preserve local geometric connectivity. Diffusion maps
+\citep{coifman2006diffusion} are the natural candidate: they build a random walk
+on the data whose slow eigenmodes parameterize the underlying geometry, and there
+is theory \citep{nadler2006diffusion,coifman2008diffusion} connecting those modes
+to reaction coordinates of stochastic systems. \citet{banisch2017diffusion}
+extend the construction to the generators of arbitrary non-degenerate It\^o
+diffusions --- exactly this setting. PCA \citep{jolliffe2002principal} is the
+natural linear baseline.
+
+\subsection{Summary of findings}
+
+The two questions receive different answers, and separating them is the main
+content of this report.
+
+\begin{enumerate}
+\item \textbf{Q1: yes, and curvature strongly affects the margin.} On RBF
+sensor-array observations the diffusion map
+attains $\lvert\rho_{\mathrm{Spearman}}\rvert = 0.9998$ against PCA's $0.6624$;
+on polynomial observations the two tie at $0.9997$. The difference is not the
+method but the geometry: the polynomial feature map leaves a dominant monotone
+imprint of $X$ (one linear direction carries $64\%$ of the variance), so a chord
+orders the arc as well as its arclength does. A comparison run only on the
+polynomial model --- as in our own preliminary configuration --- would have
+concluded, wrongly, that diffusion maps offer nothing over PCA
+(Sections~\ref{sec:res-q1}, \ref{sec:disc-pilot}).
+
+\item \textbf{Q1, caveat: the advantage lives at small bandwidth.} Sweeping
+$\eps$ over $128\times$, RBF recovery decays monotonically from $0.9998$ onto
+PCA's $0.662$. The diffusion map degenerates to a linear method as
+$\eps \to \infty$, so a bandwidth heuristic that overshoots destroys precisely
+the nonlinearity it was meant to exploit (Section~\ref{sec:res-bandwidth}).
+
+\item \textbf{Q2: controlled jointly by $\alpha$ and observation geometry.} The
+observations are a memoryless function of $X$, so sampling density is the only
+trace of the dynamics available to the point cloud. Sweeping $\alpha$ leaves
+state recovery flat at $0.9998$ while polynomial-model well accuracy falls from
+$0.9960$ ($\alpha=0$) to $0.5804$ ($\alpha=1$), whereas the geometrically
+separated RBF model changes little (Section~\ref{sec:res-alpha}).
+
+\item \textbf{The spectra identify which operator was computed.} At $\alpha=1$
+the gap ratios $(1-\lambda_k)/(1-\lambda_1)$ measure $(4.19,\,8.38)$ against the
+$(4,\,9)$ of the Laplace--Beltrami operator on an interval, and remain pinned
+there across every barrier depth --- geometry is blind to the dynamics. At
+$\alpha=1/2$ they instead rise from $10.2$ to $33.0$ as the barrier deepens,
+tracking the trend in the Kramers escape time. The $\alpha=0$ to $\alpha=1/2$
+ratio is $2.85$; this is close to the $2.77$ obtained from an isometric-coordinate
+heuristic, but the nonlinear observation metric prevents treating that agreement
+as a parameter-free prediction (Section~\ref{sec:res-spectra}).
+
+\item \textbf{A metric that certifies its own failure.} At very small bandwidth
+the graph becomes numerically nearly reducible and the leading eigenvector behaves
+like a component indicator, yet $\lvert\rho_{\mathrm{Spearman}}\rvert$ reads $0.9997$ ---
+locking onto residual variation eight orders of magnitude below the coordinate's
+own range, because rank correlation discards magnitude by construction. We give a
+MST-scale-constrained bandwidth selector and three diagnostics that detect
+this (Sections~\ref{sec:bandwidth}, \ref{sec:degeneracy}).
+\end{enumerate}
+
+\subsection{Relation to a preliminary configuration}
+\label{sec:pilot-intro}
+
+An earlier configuration of this same project --- short horizon ($T=30$),
+polynomial observations only, median-distance bandwidth, $\alpha = 1$ fixed ---
+produced results that looked clean and were substantially misleading: it reported
+$0.9846$ well-classification accuracy while measuring, as we now show, essentially
+nothing about the wells. Four independent defects conspired, and each is
+corrected here (Table~\ref{tab:corrections}). We document this explicitly in
+Section~\ref{sec:disc-pilot}, because the failure mode is not specific to this
+problem and each defect is individually plausible.
+
+\begin{table}[t]
+\centering
+\caption{The preliminary configuration and the corrections made.}
+\label{tab:corrections}
+\small
+\begin{tabular}{@{}p{0.29\textwidth}p{0.31\textwidth}p{0.32\textwidth}@{}}
+\toprule
+Defect & Consequence & Correction \\
+\midrule
+Horizon $T=30$, i.e.\ $2.4$ Kramers times; $2$--$3$ committed transitions;
+$84.9\%$ occupancy of one well
+& No dynamical statistics possible; the $2$-means threshold landed near $x=0$ by
+luck
+& $T = 600$ ($49$ escape times, $61$ transitions, $50.6\%$ occupancy) via time
+subsampling at fixed $N$ \\[4pt]
+Only $\alpha = 1$ run
+& Density information removed; the decisive normalization comparison never made
+& Sweep $\alpha \in \{0,\tfrac14,\tfrac12,\tfrac34,1\}$ \\[4pt]
+Median-distance bandwidth
+& Overshoots by $2\times$ (polynomial) to $29\times$ (RBF); drives the diffusion
+map onto the PCA baseline
+& MST-scale-constrained kernel-sum scan \\[4pt]
+Polynomial observations only
+& Manifold nearly straight, so PCA ties trivially and the comparison is
+uninformative
+& Add the RBF sensor-array model \\[4pt]
+Pearson / Spearman / well accuracy only
+& Cannot distinguish a monotone ramp from two compact levels, nor detect a
+nearly reducible kernel
+& Add well-alignment, two-cluster, and spectral degeneracy diagnostics \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Outline}
+
+Section~\ref{sec:background} reviews metastability and manifold learning.
+Section~\ref{sec:model} specifies the generative model.
+Section~\ref{sec:dm} derives the diffusion map, the $\alpha$-family, and
+bandwidth selection. Section~\ref{sec:eval} defines the baseline and metrics,
+Section~\ref{sec:implementation} the software, Section~\ref{sec:results} the
+results, Section~\ref{sec:discussion} their interpretation,
+Section~\ref{sec:limitations} limitations, and Section~\ref{sec:conclusion}
+concludes.
+
+% =============================================================================
+\section{Background and Related Work}
+\label{sec:background}
+% =============================================================================
+
+\subsection{Metastability and reaction coordinates}
+
+For a reversible diffusion $\dd X_t = -\nabla V(X_t)\dd t + \sigma\dd W_t$ the
+transition semigroup has generator
+\begin{equation}
+\mathcal{L} f = -\nabla V \cdot \nabla f + \tfrac{\sigma^2}{2}\Delta f ,
+\label{eq:generator}
+\end{equation}
+self-adjoint in $L^2(\rho_s)$ with respect to the Boltzmann density
+$\rho_s \propto e^{-2V/\sigma^2}$. When $V$ has deep minima separated by high
+barriers, $\mathcal{L}$ has a cluster of eigenvalues near zero separated by a gap
+from the rest; the associated eigenfunctions are nearly constant within each
+basin and vary sharply across transition regions. These are the \emph{slow
+modes}, and the leading nontrivial one is the \emph{reaction coordinate}
+\citep{nadler2006diffusion}.
+
+The point that organizes this paper is that this structure is a property of the
+\emph{dynamics} --- specifically of the invariant density, whose bimodality is
+what makes the transition rare. It is not a property of the geometry of the set
+the trajectory lives on, which for a one-dimensional system is an interval.
+
+\subsection{Diffusion maps}
+
+Diffusion maps \citep{coifman2006diffusion}, building on Laplacian eigenmaps
+\citep{belkin2003laplacian} and contemporaneous with Isomap
+\citep{tenenbaum2000global} and LLE \citep{roweis2000nonlinear}, construct a
+Markov chain on the data whose eigenvectors give a nonlinear embedding. Their
+distinguishing feature is a one-parameter family of kernel normalizations,
+indexed by $\alpha \in [0,1]$, controlling how much the sampling density
+influences the resulting operator: $\alpha = 0$ gives the density-weighted graph
+Laplacian, $\alpha = 1/2$ a backward Fokker--Planck-type operator in the observed
+manifold metric, and $\alpha = 1$ the Laplace--Beltrami operator with density
+removed. Convergence rates of the
+graph operator to its continuum limit were established by
+\citet{singer2006graph}.
+
+Applications to stochastic dynamics were developed by \citet{nadler2006diffusion}
+and \citet{coifman2008diffusion}, who showed that under the appropriate
+normalization the eigenvectors approximate the eigenfunctions of the backward
+Kolmogorov operator. Later refinements address the bandwidth: locally scaled maps
+\citep{rohrdanz2011determination} and variable-bandwidth kernels
+\citep{berry2016variable} adapt $\eps$ to local density, which matters greatly
+when the density is as non-uniform as a metastable trajectory makes it.
+\citet{banisch2017diffusion} construct kernels tailored to arbitrary
+non-degenerate It\^o processes so that the operator approximates the true
+generator rather than a density-biased proxy.
+
+\subsection{Positioning}
+
+This is a controlled, ground-truth-available study with a from-scratch
+implementation. Its contribution is diagnostic: by comparing against an exactly
+known latent state, against a linear baseline on identical data, and across two
+observation manifolds of deliberately different curvature, it isolates the
+conditions under which the standard construction does and does not deliver what
+practitioners want from it.
+
+% =============================================================================
+\section{The Generative Model}
+\label{sec:model}
+% =============================================================================
+
+\subsection{The double-well stochastic differential equation}
+
+The hidden state evolves by overdamped Langevin dynamics in
+\begin{equation}
+V(x) = -\tfrac12 x^2 + \tfrac14 x^4 ,
+\qquad -V'(x) = x - x^3 ,
+\label{eq:potential}
+\end{equation}
+giving the scalar It\^o equation
+\begin{equation}
+\dd X_t = \bigl(X_t - X_t^3\bigr)\dd t + \sigma\dd W_t , \qquad X_0 = x_0 .
+\label{eq:sde}
+\end{equation}
+The drift has stable fixed points at $x = \pm1$ (the wells) and an unstable one
+at $x = 0$ (the barrier), with $b'(\pm1) = -2$ and $b'(0) = +1$. The barrier
+height is $\Delta V = V(0) - V(\pm1) = 1/4$. Since the drift is a gradient the
+process is reversible, with stationary density
+\begin{equation}
+\rho_s(x) = Z^{-1}\exp\!\left(-\frac{2V(x)}{\sigma^2}\right) ,
+\label{eq:stationary}
+\end{equation}
+bimodal for the values of $\sigma$ used here.
+
+\begin{remark}[The drift is not globally Lipschitz]
+The cubic term makes $b$ only locally Lipschitz, satisfying a one-sided Lipschitz
+condition. Standard strong-convergence theorems for explicit Euler--Maruyama
+assume global Lipschitz continuity, and explicit Euler is known to diverge in the
+strong sense for superlinearly growing drifts if the step is not controlled. In
+practice the restoring cubic makes the scheme well behaved for small $\Delta t$;
+the implementation checks finiteness of the whole trajectory and raises a
+diagnostic error otherwise.
+\end{remark}
+
+\subsection{Kramers timescale and the design of the simulation}
+\label{sec:kramers}
+
+The escape rate from a well is given asymptotically by Kramers' formula
+\citep{kramers1940brownian}; in the overdamped one-dimensional case with
+$D = \sigma^2/2$,
+\begin{equation}
+k \;\approx\; \frac{\sqrt{V''(\pm 1)\,\lvert V''(0)\rvert}}{2\pi}
+\exp\!\left(-\frac{\Delta V}{D}\right)
+= \frac{\sqrt2}{2\pi}\exp\!\left(-\frac{1}{2\sigma^2}\right) ,
+\label{eq:kramers}
+\end{equation}
+using $V''(\pm1) = 2$ and $\lvert V''(0)\rvert = 1$. At the default
+$\sigma = 0.7$ this gives $\Delta V/D = 1.020$, $k \approx 0.0811$, and an escape
+time $\tau_{\mathrm{esc}} = 1/k \approx 12.3$.
+
+\begin{remark}[The barrier is shallow, deliberately]
+$\Delta V/D \approx 1$ is not a deep barrier and Eq.~\eqref{eq:kramers}, an
+asymptotic result for $\Delta V/D \gg 1$, is being used near the edge of its
+validity. The consequence is visible in the data: the path recrosses the barrier
+many times before committing, so raw sign changes badly overcount transitions
+(Section~\ref{sec:res-trajectory}). We keep $\sigma = 0.7$ as the primary setting
+anyway, because Section~\ref{sec:res-barrier} shows it is the \emph{most
+discriminating} regime: when the barrier is deep, the point cloud becomes
+geometrically clustered on its own and every choice of $\alpha$ succeeds, so the
+distinction this paper is about would be invisible.
+\end{remark}
+
+\subsection{Euler--Maruyama discretization and time subsampling}
+\label{sec:em}
+
+Equation~\eqref{eq:sde} is integrated with the explicit Euler--Maruyama scheme
+\citep{higham2001algorithmic,kloeden1992numerical}
+\begin{equation}
+X_{n+1} = X_n + \bigl(X_n - X_n^3\bigr)\Delta t + \sigma\sqrt{\Delta t}\,Z_n ,
+\qquad Z_n \stackrel{\text{iid}}{\sim}\mathcal{N}(0,1) ,
+\label{eq:em}
+\end{equation}
+obtained by replacing $\int_{t_n}^{t_{n+1}}\sigma\dd W_s$ with $\sigma\Delta W_n$
+and using $\Delta W_n \sim \mathcal{N}(0,\Delta t)$ --- whence the
+$\sqrt{\Delta t}$ scaling that distinguishes stochastic from deterministic
+integrators. The test suite checks this variance scaling explicitly.
+
+\begin{remark}[Order of convergence]
+Euler--Maruyama has strong order $1/2$ and weak order $1$ in general. Here the
+noise is \emph{additive}: $g(x)\equiv\sigma$ is constant, so $g'=0$, the Milstein
+correction $\tfrac12 gg'(\Delta W^2 - \Delta t)$ vanishes identically,
+Euler--Maruyama and Milstein coincide, and the scheme attains strong order $1$.
+\end{remark}
+
+Two requirements now conflict. Resolving the \emph{dynamics} demands a horizon of
+many escape times, i.e.\ many integration steps; the diffusion map is $O(N^2)$ in
+memory and time (Section~\ref{sec:complexity}) and so caps $N$ at a few thousand.
+We resolve this by \textbf{subsampling in time}: the SDE is integrated at the fine
+step $\Delta t = 0.01$, needed for accuracy and stability, but only every
+$20$\textsuperscript{th} point is retained. The kept series spans
+$T = 599.8 \approx 49\,\tau_{\mathrm{esc}}$ while holding $N = 3000$ points. This
+is legitimate because the retained points still come from the same trajectory and
+so are still distributed according to the invariant density --- which is the only
+property the kernel construction uses. It costs temporal resolution of individual
+crossings, which we do not need, and buys ergodic coverage, which we do. Where
+transition statistics are reported they are computed on the \emph{unsubsampled}
+path, since subsampling would miss short excursions.
+
+\subsection{Two high-dimensional observation models}
+\label{sec:obs}
+
+The learning algorithms never see $X$. Each scalar state is mapped through a
+nonlinear feature map $\phi:\R\to\R^m$, lifted by a fixed seeded Gaussian matrix
+$A \in \R^{m\times d}$, corrupted, and standardized:
+\begin{equation}
+Y = F A + \eta E ,
+\qquad F_{i\cdot} = \phi(X_i)^\top ,
+\qquad E_{ik}\stackrel{\text{iid}}{\sim}\mathcal{N}(0,1) ,
+\label{eq:observation}
+\end{equation}
+with $d = 15$ and $\eta = 0.1$ by default. Column standardization ensures
+Euclidean distances --- on which the whole kernel construction rests --- are not
+dominated by whichever coordinates carry the largest scale.
+
+\paragraph{The polynomial map ($m=9$).}
+\begin{equation}
+\phi(x) = \bigl[\,x,\;x^2,\;x^3,\;\sin x,\;\cos x,\;\sin 2x,\;\cos 2x,\;
+\tanh x,\;e^{-x^2}\,\bigr]^\top .
+\label{eq:featpoly}
+\end{equation}
+This is the map used in the preliminary configuration. It looks aggressively
+nonlinear, but four of its nine components are near-monotone in $x$, so its image
+is a gently bent arc with a strong preferred direction.
+
+\paragraph{The RBF sensor-array map ($m=12$).}
+\begin{equation}
+\phi_j(x) = \exp\!\left(-\frac{(x-c_j)^2}{2w^2}\right) ,
+\qquad c_j \text{ uniform on } [-2.2,\,2.2],
+\qquad w = 0.35 .
+\label{eq:featrbf}
+\end{equation}
+Each channel is a localized detector responding only to a band of positions ---
+the situation in spectrometers, place cells, and sensor arrays. States far apart
+in $x$ excite disjoint channels and are nearly orthogonal, so the image curve is
+strongly curved and spread across many dimensions. Its maximum-variance direction
+need not order it monotonically. This is a regime in which a manifold method can
+beat unsupervised PCA; it does not imply that every possible supervised linear
+projection must fail. Including this map and the gently bent polynomial map makes
+the PCA comparison informative.
+
+\subsection{What is identifiable}
+\label{sec:identifiability}
+
+At $\eta = 0$ the observations $Y_{i\cdot} = A^\top\phi(X_i)$ are an injective
+deterministic function of $X_i$ alone,\footnote{Injective on the trajectory's
+range: for the polynomial map the component $x\mapsto x$ is injective; for the
+RBF map the vector of responses determines $x$ within the covered range. $A$ is
+almost surely of full row rank $m \le d$.} so the noiseless cloud lies exactly on
+a one-dimensional curve $\mathcal{M}\subset\R^{15}$ parameterized by $X$. The
+intrinsic dimension is $1$; the ambient dimension is $15$.
+
+No unsupervised method can recover $X$ itself, because nothing distinguishes $X$
+from any strictly monotone reparameterization $h(X)$ --- the point cloud is
+identical. \emph{The strongest achievable result is recovery of $X$ up to a
+monotone reparameterization and a global sign.} This is why Spearman rank
+correlation, not Pearson, is the fair headline metric for Q1: it is invariant
+under $h$, whereas Pearson penalizes a warping that is fundamentally
+unidentifiable. We report both, reading Spearman as recovery and the
+Pearson--Spearman gap as a measure of warping.
+
+% =============================================================================
+\section{Diffusion Maps}
+\label{sec:dm}
+% =============================================================================
+
+Let $y_1,\dots,y_N\in\R^d$ be the rows of the standardized observation matrix.
+
+\subsection{Kernel and affinity graph}
+
+\begin{equation}
+D^2_{ij} = \norm{y_i-y_j}^2 ,
+\qquad
+K_{ij} = \exp\!\left(-\frac{D^2_{ij}}{\eps}\right) ,
+\label{eq:kernel}
+\end{equation}
+with $\eps>0$ a \emph{squared} length scale. $K$ is symmetric, strictly positive,
+and positive semidefinite, defining a weighted complete graph in which weight
+decays on the scale $\sqrt\eps$.
+
+\subsection{Anisotropic ($\alpha$) normalization and its generator limits}
+\label{sec:alpha}
+
+The data are sampled not uniformly from $\mathcal{M}$ but from the trajectory,
+hence from the bimodal density~\eqref{eq:stationary}. Left uncorrected the graph
+operator confounds geometry with density. \citet{coifman2006diffusion} remove the
+confound with a preliminary normalization: writing $q_i = \sum_j K_{ij}$,
+\begin{equation}
+\Kt_{ij} = \frac{K_{ij}}{q_i^\alpha q_j^\alpha} ,
+\qquad \alpha\in[0,1] .
+\label{eq:alpha}
+\end{equation}
+As $N\to\infty$, $\eps\to0$ the associated operator converges, up to a positive
+constant, to
+\begin{equation}
+\mathcal{L}_\alpha = \Delta
+\;+\; 2\,\frac{\nabla\rho^{\,1-\alpha}}{\rho^{\,1-\alpha}}\cdot\nabla ,
+\label{eq:alphafamily}
+\end{equation}
+with $\rho$ the sampling density \emph{with respect to volume on the observed
+manifold} and $\Delta$ the Laplace--Beltrami operator for its induced metric.
+This qualification matters: after a nonlinear observation map, $\rho$ is not
+simply the state-space density $\rho_s(x)$, and $\Delta$ is not the ordinary
+second derivative in $x$. The three canonical choices are therefore interpreted
+in observation coordinates:
+
+\begin{itemize}
+\item $\alpha=0$: $\mathcal{L}_0 = \Delta + 2(\nabla\rho/\rho)\cdot\nabla$, the
+classical normalized graph Laplacian. It emphasizes the observed sampling
+density most strongly.
+\item $\alpha=1/2$: $\mathcal{L}_{1/2} = \Delta + (\nabla\rho/\rho)\cdot\nabla$,
+a backward Fokker--Planck-type operator that retains density information. If the
+observations were an isometric coordinate for $x$, it would be a constant
+multiple of the true generator~\eqref{eq:generator}. For the nonlinear maps used
+here it is instead a dynamics-informed proxy in the induced observation metric.
+\item $\alpha=1$: the drift term vanishes and $\mathcal{L}_1 = \Delta$, the pure
+Laplace--Beltrami operator. The density is divided out completely, so the
+eigenfunctions describe the \emph{shape} of the data set and nothing about the
+dynamics that generated it.
+\end{itemize}
+
+In an isometric state coordinate, the $\alpha=0$ drift would correspond to a
+doubled effective potential. Kramers' formula would then suggest that
+$\mu_2/\mu_1$ is larger at $\alpha=0$ than at $\alpha=1/2$ by
+$e^{\Delta V/D}=2.77$ at $\sigma=0.7$. We retain this as a heuristic benchmark in
+Section~\ref{sec:res-spectra}, not as an exact prediction for the non-isometric
+observation maps.
+
+\subsection{Markov matrix and symmetric conjugation}
+
+With degrees $d_i = \sum_j\Kt_{ij}$ and $D = \diag(d_i)$,
+\begin{equation}
+P = D^{-1}\Kt , \qquad \sum_j P_{ij} = 1 ,
+\label{eq:markov}
+\end{equation}
+the transition matrix of a random walk on the data. In exact arithmetic all
+entries are positive, so the chain is irreducible and aperiodic. At very small
+bandwidth, however, floating-point weights can be negligible and the matrix can
+be numerically nearly reducible, producing additional eigenvalues extremely close
+to $1$. Away from that regime, $\lambda_0 = 1$ is simple with constant right
+eigenvector and $\lvert\lambda_k\rvert<1$ otherwise. $P$ is
+not symmetric, and a direct nonsymmetric eigensolve is slower and vulnerable to
+spurious complex eigenvalues from floating-point asymmetry. The following removes
+the difficulty.
+
+\begin{proposition}[Symmetric conjugacy]
+\label{prop:conjugacy}
+Let $\Kt$ be symmetric with strictly positive degrees, $P = D^{-1}\Kt$, and
+$P_{\mathrm{sym}} = D^{-1/2}\Kt D^{-1/2}$. Then $P_{\mathrm{sym}}$ is symmetric,
+$P = D^{-1/2}P_{\mathrm{sym}}D^{1/2}$, so $P$ and $P_{\mathrm{sym}}$ share the
+same real spectrum; and if $P_{\mathrm{sym}}v_k = \lambda_k v_k$ then
+$\psi_k = D^{-1/2}v_k$ is a right eigenvector of $P$ with eigenvalue $\lambda_k$.
+\end{proposition}
+
+\begin{proof}
+Symmetry is immediate from that of $\Kt$ and the diagonality of $D$. For the
+conjugacy,
+\[
+D^{-1/2}P_{\mathrm{sym}}D^{1/2}
+= D^{-1/2}\bigl(D^{-1/2}\Kt D^{-1/2}\bigr)D^{1/2}
+= D^{-1}\Kt = P .
+\]
+Similar matrices share eigenvalues, and a real symmetric matrix has real ones.
+Finally
+\[
+P\bigl(D^{-1/2}v_k\bigr)
+= D^{-1/2}P_{\mathrm{sym}}D^{1/2}D^{-1/2}v_k
+= D^{-1/2}P_{\mathrm{sym}}v_k
+= \lambda_k D^{-1/2}v_k . \qedhere
+\]
+\end{proof}
+
+The whole spectral computation is therefore performed on the real symmetric
+positive semidefinite $P_{\mathrm{sym}}$ with \texttt{scipy.linalg.eigh}, which
+guarantees real eigenvalues and an orthonormal basis and allows requesting only
+the top eigenpairs. The implementation additionally symmetrizes
+$P_{\mathrm{sym}}\leftarrow\tfrac12(P_{\mathrm{sym}}+P_{\mathrm{sym}}^\top)$
+against round-off before calling \texttt{eigh}.
+
+\subsection{Diffusion coordinates and diffusion distance}
+
+Ordering $1 = \lambda_0 > \lambda_1 \ge \lambda_2 \ge \cdots$ and discarding the
+trivial constant $\psi_0$, the diffusion map at time $t$ is
+\begin{equation}
+\Psi_t(y_i) = \bigl(\lambda_1^t\psi_1(i),\dots,\lambda_s^t\psi_s(i)\bigr) ,
+\label{eq:embedding}
+\end{equation}
+whose Euclidean distance equals the \emph{diffusion distance}
+\begin{equation}
+D_t^2(y_i,y_j) = \sum_{k\ge1}\lambda_k^{2t}\bigl(\psi_k(i)-\psi_k(j)\bigr)^2
+= \sum_\ell \frac{\bigl(P^t_{i\ell}-P^t_{j\ell}\bigr)^2}{\pi_\ell} ,
+\label{eq:diffdist}
+\end{equation}
+with $\pi$ the stationary distribution. Two points are close when random walks
+from each reach the rest of the data similarly after $t$ steps --- a notion
+robust to noise because it aggregates over all paths. We use $t=1$, $s=5$.
+
+\subsection{Bandwidth selection}
+\label{sec:bandwidth}
+
+The bandwidth is the most consequential hyperparameter, and it is bounded from
+both sides. If $\eps$ is too large, $K \approx \mathbf{1}\mathbf{1}^\top$: the
+walk mixes in one step and geometry is lost. If $\eps$ is too small,
+$K\approx I$: the kernel becomes numerically nearly reducible and the leading
+eigenvectors behave like component indicators.
+
+\paragraph{The median heuristic and why it fails.}
+The preliminary configuration set $\eps$ to the median of the nonzero pairwise
+squared distances. This is scale-free and robust, but it has no connection to the
+geometry of the data, and it overshoots: measured against the selector below it
+is $2.0\times$ too large on the polynomial model and $29\times$ too large on the
+RBF model. Section~\ref{sec:res-bandwidth} shows what that costs.
+
+\paragraph{MST-scale-constrained kernel-sum scan.}
+We instead use the criterion of \citet{coifman2006diffusion}. With
+\begin{equation}
+S(\eps) = \sum_{i,j}\exp\!\left(-\frac{D^2_{ij}}{\eps}\right) ,
+\end{equation}
+$S\to N$ as $\eps\to0$ and $S\to N^2$ as $\eps\to\infty$; between the plateaus
+$\log S$ is approximately linear in $\log\eps$ with slope $m\approx
+d_{\mathrm{intrinsic}}/2$, and that linear region is exactly the range at which
+the kernel resolves the manifold. We take the bandwidth of maximum slope,
+restricted from below by the conservative scale
+\begin{equation}
+\eps_{\mathrm{MST}} = \max\{\text{edge weights of the MST of } D^2\} ,
+\label{eq:floor}
+\end{equation}
+which makes every spanning-tree edge have affinity at least $e^{-1}$. This is not
+a literal connectivity threshold: a Gaussian graph is complete in exact
+arithmetic, and any operational threshold depends on an explicit affinity
+cutoff. It is a deliberately conservative lower scale that keeps the scan away
+from the nearly reducible regime where metrics fail silently
+(Section~\ref{sec:degeneracy}). The recovered slopes give
+intrinsic-dimension estimates $2m = 1.13$ (polynomial) and $2.03$ (RBF), against
+a true value of $1$ --- a useful sanity check, and a first hint that the RBF
+manifold is the harder object.
+
+\paragraph{An honest caveat.}
+This selector is a large improvement but is not reliable. Its criterion assumes a
+single manifold scale, whereas metastable data have two --- the within-well
+spread and the between-well separation --- and the kernel-sum curve accordingly
+has two knees. When the second dominates, the rule selects a bandwidth an order
+of magnitude too large; re-selecting at every measurement-noise level made the
+chosen $\eps$ jump between $0.63$ and $16.7$ on the RBF model. We therefore hold
+$\eps$ fixed within the noise study (Section~\ref{sec:res-noise}) and treat the
+bandwidth sweep, not the selector, as the primary evidence. A variable-bandwidth
+kernel \citep{berry2016variable,rohrdanz2011determination} is the principled fix
+and is left to future work.
+
+\subsection{Computational complexity}
+\label{sec:complexity}
+
+The dense distance and kernel matrices are $N\times N$, so memory and time scale
+as $O(N^2)$ and a full eigendecomposition as $O(N^3)$ (reduced here by requesting
+only the top $s+1$ pairs). A \texttt{float64} $N\times N$ matrix occupies $8N^2$
+bytes --- about $72$\,MB at $N=3000$, $800$\,MB at $N=10^4$ --- and several are
+live at once; the implementation warns above $N=4000$. This wall is exactly what
+the time subsampling of Section~\ref{sec:em} is designed to work around. Sparse
+$k$-nearest-neighbour kernels and the Nystr\"om extension
+\citep{fowlkes2004spectral} are the standard remedies and are out of scope here.
+The full experiment --- four studies, $52$ embeddings, $17$ figures --- runs in a
+few minutes.
+
+\begin{algorithm}[t]
+\caption{Diffusion map with anisotropic normalization}
+\label{alg:dm}
+\begin{algorithmic}[1]
+\Require $Y\in\R^{N\times d}$ (standardized); $\alpha$; $s$; diffusion time $t$;
+         bandwidth $\eps$ or the rule \texttt{scan}
+\Ensure  coordinates $\Psi\in\R^{N\times s}$, eigenvalues, diagnostics
+\State $D^2_{ij}\gets\norm{y_i-y_j}^2$
+       \Comment{via \texttt{pdist}/\texttt{squareform}}
+\If{$\eps = \texttt{scan}$}
+  \State $\eps_{\mathrm{MST}}\gets$ largest MST edge of $D^2$
+         \Comment{conservative scale, Eq.~\eqref{eq:floor}}
+  \State $\eps\gets\arg\max_{\eps\ge\eps_{\mathrm{MST}}}
+         \dd\log S(\eps)/\dd\log\eps$
+\EndIf
+\State $K_{ij}\gets\exp(-D^2_{ij}/\eps)$
+\State $q_i\gets\sum_j K_{ij}$;\quad
+       $\Kt_{ij}\gets K_{ij}/(q_i^\alpha q_j^\alpha)$
+\State $d_i\gets\sum_j\Kt_{ij}$;\quad \textbf{assert} $d_i>0$
+\State $P_{\mathrm{sym}}\gets D^{-1/2}\Kt D^{-1/2}$;\quad
+       $P_{\mathrm{sym}}\gets\tfrac12(P_{\mathrm{sym}}+P_{\mathrm{sym}}^\top)$
+\State $(\lambda_k,v_k)_{k=0}^s\gets$ top $s{+}1$ eigenpairs of
+       $P_{\mathrm{sym}}$ \Comment{\texttt{eigh}}
+\State $\psi_k\gets D^{-1/2}v_k$ \Comment{Proposition~\ref{prop:conjugacy}}
+\State $n_{\mathrm{triv}}\gets\#\{k:\lambda_k>1-10^{-8}\}$
+       \Comment{$>1 \Rightarrow$ disconnected or nearly reducible; warn}
+\State discard $(\lambda_0,\psi_0)$; \quad
+       $\Psi_{\cdot k}\gets\max(\lambda_k,0)^t\,\psi_k$
+\State \Return $\Psi$, $(\lambda_k)$, $n_{\mathrm{triv}}$,
+       $\#\{\text{distinct values of }\Psi_{\cdot1}\}$
+\end{algorithmic}
+\end{algorithm}
+
+% =============================================================================
+\section{Baseline and Evaluation Protocol}
+\label{sec:eval}
+% =============================================================================
+
+\subsection{PCA baseline}
+
+PCA is applied to the \emph{identical} standardized $Y$, so the methods differ
+only in the embedding. PC$_1$ is the best linear one-dimensional summary;
+$\psi_1$ a nonlinear one. If $\mathcal{M}$ is strongly curved in $\R^{15}$ a
+single linear direction cannot follow it and PCA should lose ground; if
+$\mathcal{M}$ is nearly straight the two should agree. With two observation
+models of deliberately different curvature, the comparison becomes a measurement
+of that prediction rather than a single data point.
+
+\subsection{Metrics}
+
+Every coordinate has an arbitrary global sign and an unidentifiable monotone
+warping (Section~\ref{sec:identifiability}). All reported metrics are made
+sign-invariant, but only Spearman correlation is invariant to arbitrary monotone
+warping. The first three were used in the preliminary configuration; the last three are
+added here, and Section~\ref{sec:disc-pilot} shows why they were necessary.
+
+\begin{description}
+\item[$\lvert r\rvert$, Pearson with $X$.] Linear association. Sensitive to
+monotone warping, so informative about \emph{how much} a method warps rather than
+as a pass/fail test.
+
+\item[$\lvert\rho\rvert$, Spearman with $X$.] Monotone association: the headline
+metric for Q1, exactly invariant to the unidentifiable reparameterization.
+
+\item[Well accuracy.] Balanced accuracy of a $2$-means split of the coordinate
+against true membership $\mathbf{1}\{X\ge0\}$, with cluster labels matched in
+whichever orientation scores higher. Balanced accuracy is used because the wells
+need not be equally occupied; chance is $0.5$.
+
+\item[Well-indicator alignment, $\lvert r(\psi_1,\sgn X)\rvert$.] Association
+with well membership rather than position. A coordinate behaving like a smoothed
+well indicator scores highly. This is a supervised shape diagnostic, not by
+itself a measurement of a dynamical timescale.
+
+\item[Two-cluster score.] Variance fraction explained by a sample-weighted
+$2$-means partition. Values near $1$ indicate two compact
+levels, but the score is not a formal test of bimodality: even a uniform interval
+scores $0.75$. We therefore use it only descriptively, relative to the same score
+on the true state ($0.829$).
+
+\item[Degeneracy diagnostics.] The number $n_{\mathrm{triv}}$ of computed
+eigenvalues within $10^{-8}$ of $1$ and the fraction of distinct values taken by
+$\psi_1$. Exact components create repeated unit eigenvalues; weak links create
+near-unit modes, so $n_{\mathrm{triv}}$ is not interpreted as a literal component
+count.
+\end{description}
+
+\begin{remark}[Why well accuracy alone is not enough]
+\label{rem:wellscore}
+A $2$-means split of \emph{any} strictly monotone function of $X$ places a
+threshold somewhere in the range of $X$; if it happens to fall near $x=0$ the
+balanced accuracy is high. A high well score is therefore necessary but not
+sufficient evidence of recovered two-state structure --- genuine separation
+should additionally be visible in the coordinate distribution and its
+two-cluster variance score. In the preliminary
+configuration the wells were $85/15$ occupied and the threshold landed near zero
+by luck, producing $0.9846$ from a coordinate with no two-state content.
+\end{remark}
+
+\subsection{Studies}
+
+Four sweeps, each varying one factor: \textbf{$\alpha$} over
+$\{0,\tfrac14,\tfrac12,\tfrac34,1\}$ at each model's selected bandwidth;
+\textbf{bandwidth} over $\{2^{-2},\dots,2^5\}\times\eps_{\mathrm{scan}}$;
+\textbf{measurement noise} over $\{0,0.05,0.1,0.2,0.4\}$ at fixed $\eps$; and
+\textbf{barrier depth} over $\sigma\in\{0.45,0.5,0.55,0.7\}$ with the horizon
+held fixed in units of the Kramers time, so that every setting sees a comparable
+number of transitions and depth is not confounded with sample size.
+
+% =============================================================================
+\section{Implementation and Reproducibility}
+\label{sec:implementation}
+% =============================================================================
+
+Each stage occupies a focused module. \texttt{src/simulation.py} handles the SDE
+and transition statistics; \texttt{src/observations.py} handles both observation
+maps; and \texttt{src/diffusion\_maps.py} implements Algorithm~\ref{alg:dm}.
+Metrics and PCA are in \texttt{src/evaluation.py}. The studies, plotting, and CLI
+are in \texttt{src/experiments.py}, \texttt{src/visualization.py}, and
+\texttt{run\_experiment.py}, respectively. Diffusion maps are implemented directly from the
+mathematics of Section~\ref{sec:dm}; no manifold-learning library is used. NumPy
+\citep{harris2020array}, SciPy \citep{virtanen2020scipy}, scikit-learn
+\citep{pedregosa2011scikit} (PCA, $2$-means, balanced accuracy only), pandas, and
+Matplotlib \citep{hunter2007matplotlib} supply primitives.
+
+Configuration is layered: dataclass defaults, then \texttt{config.yaml}, then
+command-line flags. Each stage is configured by a frozen dataclass validating its
+own parameters on construction, and numerical failure modes are trapped where
+they occur --- non-finite trajectories, non-positive graph degrees, and
+disconnected or nearly reducible kernels. All randomness flows through explicitly seeded
+\texttt{numpy.random.Generator} objects, and the resolved parameter set is written
+to \texttt{outputs/metrics/run\_parameters.json} on every run. The complete
+experiment is reproduced by \texttt{python run\_experiment.py} with no network
+access and no external data.
+
+A \texttt{pytest} suite of $55$ tests passes in full. The
+tests are properties, not golden values: bit-identical reproduction under a fixed
+seed, the $\sqrt{\Delta t}$ noise scaling, row-stochasticity of $P$,
+$\lambda_0 = 1$ with constant eigenvector, agreement of the symmetric-conjugation
+eigenvectors with a direct nonsymmetric solve, and --- added for this revision ---
+that subsampling returns a strict subset of the fine path, that committed
+transitions ignore barrier chatter, that the RBF image is less linearly
+explainable than the polynomial one, that the scan respects its conservative MST
+scale, that a small-bandwidth near-unit spectrum is flagged degenerate, that the
+two-cluster score is not mistaken for a modality test, and that the gap-ratio
+helper reproduces the $k^2$ law exactly on synthetic input.
+
+% =============================================================================
+\section{Results}
+\label{sec:results}
+% =============================================================================
+
+\begin{table}[t]
+\centering
+\caption{Resolved run parameters
+(\texttt{outputs/metrics/run\_parameters.json}).}
+\label{tab:params}
+\small
+\begin{tabular}{@{}llr@{}}
+\toprule
+Stage & Parameter & Value \\
+\midrule
+Simulation   & retained samples $N$          & $3000$ \\
+             & integration step $\Delta t$   & $0.01$ \\
+             & subsample stride              & $20$ \\
+             & horizon $T$                   & $599.8$ \\
+             & $T/\tau_{\mathrm{esc}}$       & $48.7$ \\
+             & process noise $\sigma$        & $0.7$ \\
+             & seed                          & $42$ \\
+\midrule
+Observation  & ambient dimension $d$         & $15$ \\
+             & polynomial features $m$       & $9$ \\
+             & RBF channels / width          & $12$ / $0.35$ \\
+             & measurement noise $\eta$      & $0.1$ \\
+             & observation seed              & $123$ \\
+\midrule
+Diffusion map& bandwidth rule                & scan \\
+             & normalization $\alpha$        & $0.5$ \\
+             & components $s$                & $5$ \\
+             & diffusion time $t$            & $1.0$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{The latent trajectory and sampling adequacy}
+\label{sec:res-trajectory}
+
+Figure~\ref{fig:traj} shows the simulated state and its density: long dwells near
+$x=\pm1$ punctuated by abrupt crossings, and a clearly bimodal density matching
+Eq.~\eqref{eq:stationary}.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.62\textwidth}
+  \includegraphics[width=\linewidth]{01_state_vs_time.png}
+  \caption{Trajectory $X_t$ over $T = 600$.}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.36\textwidth}
+  \includegraphics[width=\linewidth]{02_state_histogram.png}
+  \caption{Empirical density.}
+\end{subfigure}
+\caption{The hidden state. Occupancy is now nearly balanced ($50.6\%$ right
+well) across $61$ committed transitions, against $15.1\%$ and $2$--$3$
+transitions in the preliminary configuration.}
+\label{fig:traj}
+\end{figure}
+
+Quantitatively the sampling is now adequate for dynamical statistics. Over
+$T = 599.8 = 48.7\,\tau_{\mathrm{esc}}$ the fine path records $587$ sign changes
+but only $61$ \emph{committed} transitions --- those entering the core of one
+well ($\lvert x\rvert>0.5$) having last been in the core of the other. The gap
+between $587$ and $61$ is barrier chatter, the expected consequence of
+$\Delta V/D \approx 1.02$, and is exactly why a raw sign-change count is the
+wrong statistic. Against the Kramers prediction of $48.7$ escapes the measured
+$61$ is the right order, with the excess consistent with
+Eq.~\eqref{eq:kramers} underestimating the rate for a shallow barrier. Right-well
+occupancy is $0.506$ and the two-cluster variance score of $X$ is $0.829$, the
+descriptive reference used below.
+
+\subsection{The two observation manifolds}
+\label{sec:res-manifolds}
+
+Figure~\ref{fig:features} shows feature traces for both models. PCA on the
+standardized observations gives explained-variance ratios
+\begin{align}
+\text{polynomial:}\quad &(0.641,\ 0.192,\ 0.147,\ 0.015,\ 0.003),
+\quad \textstyle\sum_{1}^{3} = 0.980 , \\
+\text{RBF:}\quad &(0.519,\ 0.241,\ 0.128,\ 0.068,\ 0.016),
+\quad \textstyle\sum_{1}^{3} = 0.888 .
+\end{align}
+Both are effectively low-dimensional in $\R^{15}$, confirming the random lift
+added ambient dimension without information. But the leading component tells the
+story: $64\%$ on one linear direction for the polynomial map means a gently bent
+arc; $52\%$, with a much slower decay, means the RBF image genuinely resists
+linear summary. The intrinsic-dimension estimates from the bandwidth scan agree
+($1.13$ versus $2.03$ against a true value of $1$; the RBF overestimate reflects
+that at the selected scale the kernel still sees the noise directions).
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.49\textwidth}
+  \includegraphics[width=\linewidth]{03_poly_feature_traces.png}
+  \caption{Polynomial features.}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.49\textwidth}
+  \includegraphics[width=\linewidth]{03_rbf_feature_traces.png}
+  \caption{RBF sensor channels.}
+\end{subfigure}
+\caption{Observation features. Individually uninformative; collectively an
+injective encoding of $X$. The RBF channels fire selectively as the state passes
+through each detector's band.}
+\label{fig:features}
+\end{figure}
+
+\subsection{Q1: state recovery, and where PCA fails}
+\label{sec:res-q1}
+
+Table~\ref{tab:headline} and Figure~\ref{fig:recovery} give the central result
+for Q1.
+
+\begin{table}[t]
+\centering
+\caption{Headline comparison at the default settings. The reference two-cluster
+variance score of the true state is $0.829$.}
+\label{tab:headline}
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Observations & Method & $\lvert\rho\rvert$ & well alignment & 2-cluster score
+& well acc. \\
+\midrule
+polynomial & PCA                 & $0.9997$ & $0.8760$ & $0.768$ & $0.9852$ \\
+           & DM $\alpha=1/2$     & $0.9998$ & $0.8407$ & $0.707$ & $0.9937$ \\
+           & DM $\alpha=1$       & $0.9998$ & $0.6670$ & $0.511$ & $0.5804$ \\
+\midrule
+RBF        & PCA                 & $0.6624$ & $0.9309$ & $0.878$ & $0.9795$ \\
+           & DM $\alpha=1/2$     & $0.9998$ & $0.9644$ & $0.933$ & $0.9885$ \\
+           & DM $\alpha=1$       & $0.9998$ & $0.9407$ & $0.885$ & $0.9957$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.245\textwidth}
+  \includegraphics[width=\linewidth]{04_poly_dm_coordinate_vs_state.png}
+  \caption{poly, DM}
+\end{subfigure}
+\begin{subfigure}[b]{0.245\textwidth}
+  \includegraphics[width=\linewidth]{05_poly_pca_coordinate_vs_state.png}
+  \caption{poly, PCA}
+\end{subfigure}
+\begin{subfigure}[b]{0.245\textwidth}
+  \includegraphics[width=\linewidth]{04_rbf_dm_coordinate_vs_state.png}
+  \caption{RBF, DM}
+\end{subfigure}
+\begin{subfigure}[b]{0.245\textwidth}
+  \includegraphics[width=\linewidth]{05_rbf_pca_coordinate_vs_state.png}
+  \caption{RBF, PCA}
+\end{subfigure}
+\caption{The leading coordinate against the true state. Three panels show a tight
+monotone curve; panel (d) does not. On the RBF observations PC$_1$ rises to a
+peak near $X\approx0.5$ and falls thereafter, so it assigns the same value to
+$X\approx-0.3$ and $X\approx1.5$. Thus the maximum-variance linear projection
+chosen by PCA does not order this manifold, and its rank correlation drops to
+$0.6624$.}
+\label{fig:recovery}
+\end{figure}
+
+On the polynomial observations the two methods tie: $0.9997$ against $0.9998$,
+with PCA's Pearson correlation ($0.9932$) even slightly \emph{ahead} of the
+diffusion map's at $\alpha=1/2$ ($0.9554$), since the diffusion coordinate applies
+a mild monotone warp that Pearson penalizes and Spearman correctly ignores. A
+study run only on this model --- the preliminary configuration --- would conclude
+that manifold learning buys nothing.
+
+On the RBF observations the comparison separates decisively:
+$\lvert\rho\rvert = 0.9998$ for the diffusion map against $0.6624$ for PCA.
+Figure~\ref{fig:recovery}(d) shows the mechanism directly: PC$_1$ is a
+non-monotone hump. The maximum-variance linear summary folds this curve, and
+folding destroys the ordering. Figure~\ref{fig:embeddings} makes the same point
+in two dimensions.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+  \includegraphics[width=\linewidth]{06_rbf_dm_embedding_scatter.png}
+  \caption{Diffusion map.}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+  \includegraphics[width=\linewidth]{07_rbf_pca_embedding_scatter.png}
+  \caption{PCA.}
+\end{subfigure}
+\caption{Two-dimensional embeddings of the RBF observations, coloured by the true
+state.}
+\label{fig:embeddings}
+\end{figure}
+
+The answer to Q1 is therefore: \emph{yes, and curvature strongly affects the
+margin}. On these two encodings the diffusion map ties PCA on the gently bent
+curve and does dramatically better on the strongly curved one. This comparison
+concerns unsupervised PCA, not every possible supervised linear projection.
+
+\subsection{Q2: normalization and observation geometry}
+\label{sec:res-alpha}
+
+Table~\ref{tab:alpha} and Figure~\ref{fig:alpha} sweep $\alpha$ with everything
+else held fixed.
+
+\begin{table}[t]
+\centering
+\caption{The $\alpha$ study. State recovery is flat. Density-sensitive shape
+measures fall strongly on the polynomial model and only weakly on the
+geometrically separated RBF model. Reference two-cluster score of $X$: $0.829$.}
+\label{tab:alpha}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Observations & $\alpha$ & $\lvert\rho\rvert$ & well alignment & 2-cluster score
+& well acc. & $\mu_2/\mu_1$ \\
+\midrule
+polynomial & $0.00$ & $0.9998$ & $0.9071$ & $0.823$ & $0.9960$ & $2.33$ \\
+           & $0.25$ & $0.9998$ & $0.8924$ & $0.797$ & $0.9960$ & $1.90$ \\
+           & $0.50$ & $0.9998$ & $0.8407$ & $0.707$ & $0.9937$ & $1.41$ \\
+           & $0.75$ & $0.9998$ & $0.6566$ & $0.446$ & $0.9249$ & $1.58$ \\
+           & $1.00$ & $0.9998$ & $0.6670$ & $0.511$ & $\mathbf{0.5804}$ & $2.99$ \\
+\midrule
+RBF        & $0.00$ & $0.9997$ & $0.9686$ & $0.949$ & $0.9754$ & $28.99$ \\
+           & $0.25$ & $0.9997$ & $0.9675$ & $0.942$ & $0.9825$ & $16.92$ \\
+           & $0.50$ & $0.9998$ & $0.9644$ & $0.933$ & $0.9885$ & $10.17$ \\
+           & $0.75$ & $0.9998$ & $0.9571$ & $0.916$ & $0.9939$ & $6.27$ \\
+           & $1.00$ & $0.9998$ & $0.9407$ & $0.885$ & $0.9957$ & $4.19$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{08_alpha_study.png}
+\caption{The normalization study. Left: state recovery is untouched by $\alpha$
+(and the RBF PCA baseline sits far below). Centre and right: density-sensitive
+shape changes strongly on the polynomial model and weakly on the RBF model.}
+\label{fig:alpha}
+\end{figure}
+
+Three things are visible at once. First, \textbf{$\alpha$ does not affect Q1}:
+$\lvert\rho\rvert$ is $0.9997$--$0.9998$ everywhere. Geometric recovery is
+robust to the normalization.
+
+Second, \textbf{$\alpha$ strongly controls the polynomial-model answer}. Well
+alignment falls from $0.907$ to $0.667$, the two-cluster score from $0.823$ to
+$0.511$ against a true-state reference of $0.829$, and well accuracy from
+$0.9960$ to $\mathbf{0.5804}$ --- poor, though above the $0.5$ chance baseline.
+The data, bandwidth, and eigensolver are fixed; only the density normalization
+changes.
+
+Third, \textbf{the two-cluster score gives a descriptive view of the same trend}.
+At $\alpha=0$ the polynomial model gives $0.823$ against the true-state reference
+$0.829$; at $\alpha=1/2$ it is $0.707$ and at $\alpha=1$, $0.511$. These values
+show loss of compact two-level structure as density is removed, but they are not
+a formal test of bimodality and should not be read as exact operator theory.
+
+The RBF model shows the same well-alignment trend but far more weakly
+$0.969\to0.941$; well accuracy actually \emph{rises}). The reason is instructive
+and is confirmed independently in Section~\ref{sec:res-barrier}: in the RBF
+encoding, states in different wells excite disjoint channels and are therefore
+far apart \emph{geometrically}, so the point cloud is already two-clustered as a
+set. Geometry and dynamics happen to agree, and dividing out the density costs
+little. On the polynomial model, whose image is a compact arc, density supplies
+most of the visible well separation, and $\alpha=1$ suppresses it.
+
+\subsection{Spectral signatures: which operator was computed}
+\label{sec:res-spectra}
+
+The eigenvalues identify the limiting operator, and do so more sharply than any
+of the correlation metrics. We read them through the gap ratios
+$(1-\lambda_k)/(1-\lambda_1)$, which estimate $\mu_k/\mu_1$ since
+$\lambda_k \approx 1 - c\,\eps\,\mu_k$ and the unknown constant cancels.
+
+\paragraph{At $\alpha=1$: the $k^2$ law of an interval.}
+For the Laplace--Beltrami operator on a one-dimensional interval with free ends
+the eigenfunctions are the Neumann cosine modes $\cos(k\pi s/L)$ with
+$\mu_k = (k\pi/L)^2$, so $\mu_k/\mu_1 = k^2$, i.e.\ $(4,\,9,\,16)$. The RBF model
+at $\alpha=1$ measures $(4.19,\ 8.38)$ for $k=2,3$. The diffusion map has computed
+the Laplacian of a curve.
+
+\paragraph{At $\alpha=1/2$: a density-sensitive timescale gap.}
+The same model at $\alpha=1/2$ gives $\mu_2/\mu_1 = 10.17$ --- a genuine
+separation between one slow mode and the rest, which is the spectral signature of
+metastable structure in the sampled cloud and is nothing like $4$. Because the
+RBF observation map is not isometric, this is not an exact physical timescale of
+Eq.~\eqref{eq:sde}.
+
+\paragraph{A heuristic check on $\alpha=0$.}
+In an isometric state coordinate, Section~\ref{sec:alpha} gives the heuristic
+factor $e^{\Delta V/D}=e^{1.020}=2.77$ between the $\alpha=0$ and $\alpha=1/2$
+gap ratios. The measured ratio is $28.99/10.17=\mathbf{2.85}$. The proximity is
+consistent with stronger density weighting at $\alpha=0$, but it is not a
+parameter-free validation: Kramers' formula is being used outside its deep-barrier
+regime, and the induced RBF metric modifies both operators.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\textwidth]{12_alpha_spectra.png}
+\caption{Timescale separation versus normalization. The RBF curve descends from
+$29.0$ at $\alpha=0$ to $4.19$ at $\alpha=1$ --- landing on the dashed $k^2$ line
+that marks the one-dimensional interval Laplacian.}
+\label{fig:spectra}
+\end{figure}
+
+The polynomial model at $\alpha=1$ gives $(2.99,\ 5.75)$, heading toward
+$(4,\,9)$ but not arriving, because its conservative MST scale leads to a bandwidth
+($\eps = 12.8$) too large for the continuum limit to be well approximated. This
+is itself a useful observation: the $k^2$ signature is clearest exactly when the
+bandwidth can be taken small, which is when the manifold is well spread out.
+
+\subsection{Sensitivity to kernel bandwidth}
+\label{sec:res-bandwidth}
+
+\begin{table}[t]
+\centering
+\caption{Bandwidth study at $\alpha=1/2$. PCA is bandwidth-independent
+($0.9997$ polynomial, $0.6624$ RBF).}
+\label{tab:bandwidth}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+$\eps/\eps_{\mathrm{scan}}$ & \multicolumn{2}{c}{polynomial}
+& \multicolumn{2}{c}{RBF} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+& $\eps$ & $\lvert\rho\rvert$ & $\eps$ & $\lvert\rho\rvert$ \\
+\midrule
+$0.25$ & $3.19$   & $0.9998$ & $0.263$ & $0.9998$ \\
+$0.5$  & $6.39$   & $0.9998$ & $0.526$ & $0.9998$ \\
+$1$    & $12.77$  & $0.9998$ & $1.052$ & $0.9998$ \\
+$2$    & $25.55$  & $0.9998$ & $2.105$ & $0.9950$ \\
+$4$    & $51.09$  & $0.9997$ & $4.209$ & $0.8785$ \\
+$8$    & $102.19$ & $0.9997$ & $8.418$ & $0.7197$ \\
+$16$   & $204.37$ & $0.9997$ & $16.84$ & $0.6848$ \\
+$32$   & $408.74$ & $0.9997$ & $33.67$ & $0.6541$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{09_bandwidth_study.png}
+\caption{Bandwidth sweep. On the RBF observations the diffusion map decays
+monotonically from $0.9998$ onto the PCA baseline (dotted) as $\eps$ grows.}
+\label{fig:bandwidth}
+\end{figure}
+
+The polynomial model is insensitive: $\lvert\rho\rvert$ moves by $10^{-4}$ across
+a $128\times$ sweep, because a nearly straight manifold is ordered correctly at
+any scale. The RBF model tells the real story: recovery is flat at $0.9998$ up to
+$\times2$, then falls monotonically to $0.6541$ at $\times32$ ---
+\textbf{converging onto PCA's $0.6624$}.
+
+This is the mechanism behind the whole bandwidth question. As $\eps\to\infty$,
+$K_{ij} = \exp(-D^2_{ij}/\eps) \approx 1 - D^2_{ij}/\eps$, so the kernel becomes
+an affine function of the squared distances and the diffusion map degenerates to a
+linear method operating on the Gram matrix --- that is, to PCA. \emph{An
+overshooting bandwidth does not merely blur the embedding; it converts the
+nonlinear method into the linear one it was supposed to beat.} Since the median
+heuristic overshoots by $29\times$ on this model, it lands squarely in the
+degenerate regime, and this is precisely why the preliminary configuration found
+diffusion maps and PCA indistinguishable.
+
+\subsection{Sensitivity to measurement noise}
+\label{sec:res-noise}
+
+\begin{table}[t]
+\centering
+\caption{Measurement-noise study at fixed bandwidth (Section~\ref{sec:bandwidth}).}
+\label{tab:noise}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{polynomial} & \multicolumn{2}{c}{RBF} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+$\eta$ & DM $\lvert\rho\rvert$ & PCA $\lvert\rho\rvert$
+       & DM $\lvert\rho\rvert$ & PCA $\lvert\rho\rvert$ \\
+\midrule
+$0.00$ & $1.0000$ & $1.0000$ & $1.0000$ & $0.6297$ \\
+$0.05$ & $0.9999$ & $0.9999$ & $0.9999$ & $0.6450$ \\
+$0.10$ & $0.9998$ & $0.9997$ & $0.9998$ & $0.6624$ \\
+$0.20$ & $0.9992$ & $0.9987$ & $0.9987$ & $0.6847$ \\
+$0.40$ & $0.9974$ & $0.9960$ & $0.9235$ & $0.7022$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{10_noise_study.png}
+\caption{Robustness to measurement noise. The diffusion map's advantage on the
+RBF observations persists across the whole range.}
+\label{fig:noise}
+\end{figure}
+
+At $\eta=0$ both methods attain $\lvert\rho\rvert = 1.0000$ on the polynomial
+model, consistent with Section~\ref{sec:identifiability}: the noiseless
+observations are a deterministic injective function of $X$ and perfect monotone
+recovery is attainable in principle. Degradation is graceful thereafter. The
+diffusion map holds its RBF advantage across the entire sweep --- $0.9235$ against
+$0.7022$ even at $\eta = 0.4$, where the noise is four times the default.
+
+Before column standardization, measurement noise adds $2d\eta^2$ in expectation
+to each squared pairwise distance. Standardization rescales that contribution, so
+the expression is only a qualitative guide to why small isotropic noise is mild;
+degradation becomes pronounced once noise competes with the intrinsic curve's
+local separation. PCA's RBF
+score \emph{rises} slightly with noise ($0.630\to0.702$), which is not an
+improvement in any meaningful sense but an artifact of noise flattening the
+folded hump of Figure~\ref{fig:recovery}(d) relative to its linear component.
+
+\subsection{Sensitivity to barrier depth}
+\label{sec:res-barrier}
+
+\begin{table}[t]
+\centering
+\caption{Barrier study. The horizon is scaled to hold $T/\tau_{\mathrm{esc}}$
+roughly fixed, giving $45$--$61$ committed transitions throughout. $1/k$ is the
+Kramers escape time.}
+\label{tab:barrier}
+\begin{tabular}{@{}lrrrrrrrr@{}}
+\toprule
+& & & & \multicolumn{2}{c}{poly.\ well alignment}
+& \multicolumn{2}{c}{RBF $\mu_2/\mu_1$} & \\
+\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+$\sigma$ & $\Delta V/D$ & $T$ & trans.
+& $\alpha=\tfrac12$ & $\alpha=1$
+& $\alpha=\tfrac12$ & $\alpha=1$ & $1/k$ \\
+\midrule
+$0.45$ & $2.47$ & $2549$ & $50$ & $0.961$ & $0.900$ & $32.95$ & $4.75$ & $52.5$ \\
+$0.50$ & $2.00$ & $1589$ & $45$ & $0.950$ & $0.838$ & $23.30$ & $5.11$ & $32.8$ \\
+$0.55$ & $1.65$ & $1140$ & $49$ & $0.910$ & $0.834$ & $14.87$ & $4.66$ & $23.2$ \\
+$0.70$ & $1.02$ & $600$  & $61$ & $0.841$ & $0.667$ & $10.17$ & $4.19$ & $12.3$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{11_barrier_study.png}
+\caption{Barrier depth. The $\alpha=1/2$ and $\alpha=1$ curves converge as the
+barrier deepens: when the point cloud is geometrically clustered, geometry and
+dynamics agree.}
+\label{fig:barrier}
+\end{figure}
+
+Two readings, and the second is the cleanest single result in this paper.
+
+First, \textbf{the $\alpha$ effect is largest in the shallow-barrier regime}. On
+the polynomial model the $\alpha=1/2$ to $\alpha=1$ gap in well alignment is
+$0.061$ at $\Delta V/D = 2.47$ but $0.174$ at $\Delta V/D = 1.02$. When the
+barrier is deep, points pile up near $\pm1$ and thin out between, so the sampled
+set becomes geometrically two-clustered and even a density-free operator finds the
+split. When the barrier is shallow, the barrier region is populated, the geometry
+is a continuum, and only the density carries the two-state information --- which
+$\alpha=1$ discards. Deep barriers hide the distinction; shallow ones expose it.
+This retrospectively justifies keeping $\sigma=0.7$ as the primary setting.
+
+Second, \textbf{the $\alpha=1$ spectral gap is insensitive to barrier depth}. Across a
+$4.3\times$ range of Kramers times ($12.3$ to $52.5$) the RBF $\alpha=1$ ratio
+sits at $4.75,\,5.11,\,4.66,\,4.19$ --- pinned near the geometric value $4$ and
+showing no clear trend. Over the same range the $\alpha=1/2$ ratio moves
+$10.17\to14.87\to23.30\to32.95$, tracking the trend in $1/k$ and lying within a
+factor of $0.63$--$0.83$ of it. This is evidence that density-sensitive
+normalization retains information about changing metastability. It is not a
+direct recovery of the physical timescale: Kramers' formula is asymptotic here,
+and the non-isometric observation map changes the operator's metric. The contrast
+with the nearly fixed $\alpha=1$ geometric ratio is the robust conclusion.
+
+\subsection{A metric that certifies its own failure}
+\label{sec:degeneracy}
+
+One negative result deserves its own statement, because it would silently
+invalidate any study that used only the original three metrics.
+
+An unconstrained kernel-sum scan can select a bandwidth at which the kernel is
+numerically nearly reducible. The conservative MST scale for the polynomial
+observations is $\eps_{\mathrm{MST}}=3.418$; at
+$\eps=0.05\,\eps_{\mathrm{MST}}=0.171$ the leading eigenvalues round to
+$(1,\,1,\,1,\,0.99992)$. The Gaussian graph remains connected at an affinity
+cutoff of $10^{-12}$, but two extreme samples, $x\in[1.82,1.87]$, are so weakly
+coupled that $\psi_1$ behaves like their component indicator: they sit near
+$-0.70$, while the other $2998$ values agree to within $3.8\times10^{-8}$. The
+coordinate carries no usable global information, and $2$-means isolates those two
+points, giving balanced accuracy $0.5007$, essentially chance.
+
+Its Spearman correlation with the true state is $\mathbf{-0.9997}$.
+
+The mechanism is worth stating precisely, because it is not simply tied ranks.
+Rank correlation is scale-free: it discards magnitude entirely and sees only
+ordering. Inside the near-constant blob the residual variation --- some
+$8$ orders of magnitude below the coordinate's full span of $0.71$, and
+attributable to the smooth variation of the graph degree $d_i^{-1/2}$ along the
+curve --- happens to be monotone in $x$. Spearman therefore locks onto numerical
+dust and reports near-perfect recovery. \emph{Precisely the property that makes
+Spearman the right headline metric for Q1 --- invariance to monotone
+reparameterization, hence to scale --- is what makes it incapable of noticing
+that the structure it is ranking is numerically negligible.}
+
+The two metrics thus flatly contradict each other, and only one is useful. We
+therefore report the number of computed eigenvalues within $10^{-8}$ of $1$ and
+the fraction of distinct coordinate values. The implementation warns about a
+disconnected or nearly reducible kernel without equating near-unit modes to a
+literal component count. \textbf{Rank correlation must never be read from a
+diffusion map without also inspecting the spectrum and coordinate scale.}
+
+% =============================================================================
+\section{Discussion}
+\label{sec:discussion}
+% =============================================================================
+
+\subsection{Answers to the two questions}
+
+\textbf{Q1 is answered affirmatively, with a condition.} The diffusion map
+recovers the hidden state to $\lvert\rho\rvert = 0.9998$ through a nonlinear,
+noisy, $15$-dimensional encoding, which by Section~\ref{sec:identifiability} is
+the strongest form of recovery the problem admits. It beats PCA decisively
+($0.9998$ against $0.6624$) when the observation manifold is strongly curved and
+ties when it is not. The condition is the bandwidth: the advantage exists only
+below roughly twice the scan-selected $\eps$ and vanishes smoothly onto the PCA
+baseline above it.
+
+\textbf{Q2 depends on both normalization and observation geometry.} On the
+polynomial model, $\alpha=1$ gives well accuracy $0.5804$ while $\alpha\le1/2$
+gives above $0.99$; on the RBF model, geometric well separation makes every
+normalization score highly. Thus $\alpha$ controls how much sampling density is
+retained, but the data geometry controls the practical size of the effect.
+
+\subsection{Why the standard default is the wrong one here}
+\label{sec:disc-geometry}
+
+Two facts compound. The observation map is \emph{memoryless}: each $y_i$ depends
+only on $X_i$, so shuffling the time index leaves the diffusion map exactly
+unchanged, and the point cloud carries no information about ordering, correlation
+times, or rates. The single imprint the dynamics leave is the sampling density,
+since the particle dwells near the wells and points accumulate there. And
+$\alpha=1$ is defined by the property that it divides that density out.
+
+The data contain no dynamical information except the density; the normalization
+deletes the density. Nothing goes wrong in the implementation --- the method
+faithfully computes the operator it was asked to compute, and
+Section~\ref{sec:res-spectra} confirms by the $k^2$ law that the operator is the
+interval Laplacian. The mismatch is between that operator and the question.
+
+This is consistent with the literature, with one important qualification. When
+\citet{nadler2006diffusion} and \citet{coifman2008diffusion} connect diffusion
+coordinates to reaction coordinates, the relevant normalization is $\alpha=1/2$.
+It gives the backward Fokker--Planck generator only in coordinates with the
+appropriate metric; under our nonlinear observation maps it is a
+density-sensitive proxy rather than the exact generator of Eq.~\eqref{eq:sde}.
+Choosing $\alpha=1$ --- the right default when the goal is to recover shape
+independent of how densely one sampled --- silently changes the question from
+``what are the slow variables of this process?'' to ``what does this set of
+points look like?''. For Q1 the latter suffices. For Q2 it discards the one
+dynamical imprint available to a memoryless point cloud, although geometry may
+still separate the wells as it does for the RBF encoding.
+
+\subsection{Why the preliminary configuration was misleading}
+\label{sec:disc-pilot}
+
+The earlier configuration reported $\lvert\rho\rvert = 0.9992$ and $0.9846$ well
+accuracy and concluded that diffusion maps recover the state, tie with PCA, and
+separate the wells. The first claim was right, the second was an artifact, and
+the third was false. Four defects (Table~\ref{tab:corrections}) each contributed,
+and none was individually unreasonable:
+
+\begin{itemize}
+\item \textbf{The horizon was too short.} $T=30$ is $2.4$ escape times; the path
+made $2$--$3$ committed transitions and spent $84.9\%$ of its time in one well.
+No dynamical quantity was estimable, and the imbalance meant a $2$-means split of
+\emph{any} monotone coordinate landed near $x=0$, manufacturing the $0.9846$. With
+balanced occupancy the same configuration yields $0.5804$ --- the reported number
+moved by $40$ points once the sampling was fixed, with no change to the method.
+
+\item \textbf{The bandwidth overshot.} The median heuristic sat $29\times$ above
+the scan-selected value on curved data, i.e.\ deep in the regime where the
+diffusion map degenerates to PCA (Section~\ref{sec:res-bandwidth}). The observed
+tie with PCA was therefore not a finding about manifold learning but a
+consequence of the hyperparameter.
+
+\item \textbf{Only $\alpha=1$ was run.} This density-free normalization suppresses
+the well structure on the compact polynomial arc, so the decisive normalization
+comparison was never made.
+
+\item \textbf{Only one observation model was used}, and its image was nearly
+straight, so PCA had no reason to fail and the comparison carried no information.
+\end{itemize}
+
+The general lesson is that the defects were mutually camouflaging. The short
+horizon inflated the well score, which made the $\alpha=1$ failure invisible; the
+overshooting bandwidth produced a PCA tie, which looked like a substantive
+negative result rather than a hyperparameter artifact; and the single
+near-linear observation model gave no contrast that would have exposed either.
+Each check that would have caught one defect was itself compromised by another.
+
+\subsection{Practical guidance}
+
+\begin{enumerate}
+\item \textbf{Choose $\alpha$ from the question.} Use $\alpha=1$ for geometry
+independent of sampling density and $\alpha=1/2$ when density-sensitive structure
+is relevant. Recovering the exact physical generator additionally requires the
+correct metric or a dynamics-tailored kernel.
+
+\item \textbf{Verify which operator you converged to.} Gap ratios near
+$(4,9,16)$ support the interval Laplacian --- geometry. A large
+$\mu_2/\mu_1$ that moves with a physical parameter is evidence of retained
+density information, not by itself proof that the exact physical generator was
+recovered.
+
+\item \textbf{Check conditioning before reading any score.} Rank correlation can
+report $0.9997$ for a numerically nearly reducible kernel
+(Section~\ref{sec:degeneracy}).
+
+\item \textbf{Do not trust a bandwidth heuristic based on typical distances.}
+Overshooting converts the diffusion map into PCA. Sweep $\eps$ and look for the
+plateau; if the method's advantage over a linear baseline disappears at large
+$\eps$, that is the expected behaviour, not evidence about the method.
+
+\item \textbf{Test manifold learning against PCA on a curved manifold.} A pipeline
+can look aggressively nonlinear and still present a nearly linear problem, since
+what matters is the linearity of the \emph{leading} direction, not the
+nonlinearity of individual coordinates.
+\end{enumerate}
+
+% =============================================================================
+\section{Limitations and Future Work}
+\label{sec:limitations}
+% =============================================================================
+
+\paragraph{Limitations.}
+(i) Every result rests on a single trajectory from a single seed; no error bars
+over simulation replicates are reported, so the small differences --- the
+polynomial-model DM/PCA margins, PCA's non-monotone RBF noise trend --- should
+not be interpreted. The large effects ($0.9998$ versus $0.6624$; $0.9960$ versus
+$0.5804$) are unlikely to reverse, but their seed variability has not been
+measured.
+(ii) The automatic bandwidth selector is not reliable
+(Section~\ref{sec:bandwidth}); the bandwidth sweep, not the selector, carries the
+evidence.
+(iii) Both observation models are memoryless, so no method operating on this
+point cloud can access dynamical information beyond the invariant density.
+(iv) The dense $O(N^2)$ formulation caps $N$ at a few thousand, which is why the
+long horizon had to be bought by subsampling rather than by more points.
+(v) The barrier study varies $\sigma$, which changes both the barrier depth and
+the width of the sampled region; the two effects are not separated.
+(vi) The two-cluster variance score is descriptive rather than a formal modality
+test, and the well-alignment score uses ground truth; neither alone proves
+dynamical recovery.
+(vii) The Kramers comparisons in Sections~\ref{sec:res-trajectory}
+and~\ref{sec:res-barrier} use an asymptotic formula at $\Delta V/D$ between $1$
+and $2.5$, and agree in trend and order of magnitude but not in constant.
+
+\paragraph{Future work.}
+The clearest next step is \textbf{time-lagged kernels}. Every limitation of type
+(iii) follows from the observations being memoryless; a kernel built on
+delay-embedded observations, or TICA \citep{perez2013identification}, uses the
+time-lagged covariance and therefore sees the dynamics directly rather than
+through the density. That would let the reaction coordinate be recovered without
+relying on $\alpha$ to reintroduce information the encoding discarded. Beyond it:
+
+\begin{itemize}
+\item \textbf{It\^o-tailored kernels.} The construction of
+\citet{banisch2017diffusion} targets the generator of an arbitrary
+non-degenerate It\^o process directly, and would apply unchanged to irreversible
+or state-dependent-noise variants of Eq.~\eqref{eq:sde}. Even in the present
+problem, standard $\alpha=1/2$ normalization does not by itself correct the metric
+distortion introduced by a nonlinear observation map.
+\item \textbf{Variable bandwidth.} Locally scaled
+\citep{rohrdanz2011determination} or variable-bandwidth
+\citep{berry2016variable} kernels, which would address both the selector's
+instability and the non-uniform sampling that causes it.
+\item \textbf{Sparse and Nystr\"om methods} \citep{fowlkes2004spectral} to lift
+the $O(N^2)$ cap and allow long horizons without subsampling.
+\item \textbf{Replicate seeds} to put error bars on every table.
+\item \textbf{Higher-dimensional and asymmetric potentials}, where the reaction
+coordinate is a genuinely nonlinear function of the observables and the
+transition path is curved.
+\end{itemize}
+
+% =============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% =============================================================================
+
+We implemented diffusion maps from first principles and asked what they recover
+from a stochastic double-well system observed through a nonlinear, noisy,
+$15$-dimensional encoding. The answer separates into two.
+
+On \emph{state recovery}, diffusion maps work and beat the linear baseline
+exactly where theory says they should. The leading nontrivial coordinate orders
+the samples as the hidden state does to
+$\lvert\rho_{\mathrm{Spearman}}\rvert = 0.9998$ on both observation models, while
+PCA manages only $0.6624$ on the curved one, where its first component folds into
+a non-monotone hump. The advantage is real but conditional: as the bandwidth
+grows the Gaussian kernel becomes affine in the squared distances and the
+diffusion map degenerates onto PCA, which we observe directly as recovery decays
+from $0.9998$ to $0.654$ against PCA's $0.662$.
+
+On \emph{metastable structure}, normalization and observation geometry interact.
+Because the observations are memoryless, sampling density is the only dynamical
+imprint available to the point cloud, and $\alpha=1$ removes it. On the polynomial
+model, well accuracy consequently falls from $0.9960$ to $0.5804$ as $\alpha$
+increases; on the geometrically separated RBF model it remains high. At
+$\alpha=1$ the RBF gap ratios sit near the interval $k^2$ law and remain nearly
+fixed as the barrier changes, while at $\alpha=1/2$ the leading gap grows with the
+Kramers-time trend. The latter is evidence of retained density information, not
+an exact recovery of the physical generator, because the nonlinear observation
+map changes the metric.
+
+We also documented how a plausible-looking configuration of this same study
+reached the opposite conclusions, and why: a horizon of $2.4$ escape times made a
+$2$-means threshold land near the barrier by luck and manufacture a $0.9846$ well
+accuracy that is $0.5804$ once the sampling is balanced; a median-distance
+bandwidth overshot by $29\times$ into the regime where the method is PCA; and
+rank correlation reported $0.9997$ for a nearly reducible kernel whose leading
+eigenvector behaved like a two-point component indicator. The defects were mutually
+camouflaging, and none was individually unreasonable.
+
+The transferable conclusion is narrow and practical. A diffusion map answers
+whichever question its normalization encodes, at whichever scale its bandwidth
+selects, and its headline metric can certify an embedding that carries no
+information at all. Before interpreting slow modes as reaction coordinates, it is
+worth inspecting near-unit eigenvalues, the $k^2$ signature, and a bandwidth
+sweep, and remembering that the observation metric determines which continuum
+operator is approximated.
+
+% =============================================================================
+\section*{Reproducibility Statement}
+% =============================================================================
+\addcontentsline{toc}{section}{Reproducibility Statement}
+
+Every reported number and table is derived from the CSV outputs of
+\texttt{python run\_experiment.py}; the numerical values are transcribed into the
+\LaTeX\ source, while the figures are generated directly by the script. The run
+uses the parameters of Table~\ref{tab:params}, with no network access or external
+data. Outputs are written to \texttt{outputs/data/}, \texttt{outputs/metrics/}
+(four per-study CSVs, a combined table, and the resolved parameters as JSON), and
+\texttt{outputs/figures/} (seventeen 300-DPI PNGs). The degeneracy demonstration
+of Section~\ref{sec:degeneracy} is reproduced by the script in
+Appendix~\ref{app:degeneracy}. Outputs of the superseded preliminary
+configuration are retained under \texttt{outputs/\_superseded/} for comparison.
+The test suite is run with \texttt{pytest} ($55$ passed).
+
+% =============================================================================
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\newpage
+
+% =============================================================================
+\section{Notation}
+\label{app:notation}
+% =============================================================================
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+$X_t,\ X_n$ & hidden scalar state; continuous and discrete time \\
+$V(x)$ & double-well potential $-x^2/2 + x^4/4$ \\
+$\sigma$, $D$ & process-noise coefficient; diffusion constant $\sigma^2/2$ \\
+$\Delta V$, $k$ & barrier height $1/4$; Kramers escape rate \\
+$\Delta t$, $N$, $T$ & integration step, retained samples, horizon \\
+$\rho_s$ & stationary density $\propto e^{-2V/\sigma^2}$ \\
+$\phi(x)$, $m$ & feature map and its dimension ($9$ polynomial, $12$ RBF) \\
+$A$, $d$ & random lift matrix; ambient dimension ($15$) \\
+$\eta$ & measurement-noise standard deviation \\
+$Y$, $y_i$ & standardized observation matrix and its rows \\
+$\mathcal{M}$ & the intrinsic one-dimensional observation curve \\
+$\eps$ & kernel bandwidth (a squared length scale) \\
+$K$, $\Kt$ & Gaussian kernel; $\alpha$-normalized kernel \\
+$q_i$, $d_i$, $D$ & density proxy, graph degree, degree matrix \\
+$\alpha$ & anisotropic normalization exponent \\
+$P$, $P_{\mathrm{sym}}$ & Markov matrix and its symmetric conjugate \\
+$\lambda_k$, $\psi_k$ & eigenvalues and right eigenvectors of $P$ \\
+$\mu_k$ & continuum eigenvalues; $\mu_k/\mu_1 \approx
+          (1-\lambda_k)/(1-\lambda_1)$ \\
+$\mathrm{PC}_1$ & first principal component of $Y$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =============================================================================
+\section{Reproducing the Degeneracy Demonstration}
+\label{app:degeneracy}
+% =============================================================================
+
+Run from the project root after \texttt{python run\_experiment.py}. It reproduces
+the numbers of Section~\ref{sec:degeneracy}: a nearly reducible kernel whose
+leading eigenvector behaves like a two-point component indicator, yet whose
+Spearman correlation with the true state reads $-0.9997$.
+
+\begin{small}
+\begin{verbatim}
+import warnings
+import numpy as np, sys; sys.path.insert(0, '.')
+from scipy.stats import spearmanr
+from src.diffusion_maps import (DiffusionMapConfig, compute_diffusion_map,
+                                connectivity_scale, squared_distance_matrix)
+from src.evaluation import well_classification_score
+
+Y = np.load('outputs/data/observations_poly.npy')
+x = np.load('outputs/data/latent_state.npy')
+
+mst_scale = connectivity_scale(squared_distance_matrix(Y))
+print(f'MST scale         = {mst_scale:.4f}')
+
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore')                  # we are provoking it
+    r = compute_diffusion_map(Y, DiffusionMapConfig(epsilon=0.05 * mst_scale,
+                                                    n_components=3))
+p1 = r.coordinates[:, 0]
+print(f'eps              = {r.epsilon:.4f}')
+print(f'eigenvalues      = {np.round(r.eigenvalues[:4], 6)}')
+print(f'near-unit modes  = {r.n_trivial}   degenerate = {r.is_degenerate}')
+print(f'psi_1 full range = {p1.max() - p1.min():.4f}')
+print(f'psi_1 IQR        = {np.subtract(*np.percentile(p1, [75, 25])):.3e}'
+      f'   <-- 8 orders below the range')
+print(f'Spearman with X  = {spearmanr(p1, x).correlation:+.4f}   <-- numerical dust')
+print(f'well accuracy    = {well_classification_score(p1, x):.4f}   <-- chance')
+\end{verbatim}
+\end{small}
+
+% =============================================================================
+\section{Output Manifest}
+\label{app:manifest}
+% =============================================================================
+
+\begin{small}
+\begin{verbatim}
+outputs/
+  data/
+    time.npy, latent_state.npy         # retained time grid and state
+    latent_state_full.npy              # unsubsampled path (transition stats)
+    observations_{poly,rbf}.npy        # standardized Y for each model
+    features_{poly,rbf}.npy            # feature matrices F
+    dm_coordinates_{poly,rbf}.npy      # diffusion coordinates
+    pca_scores_{poly,rbf}.npy          # principal-component scores
+  metrics/
+    alpha_study.csv                    # normalization study
+    bandwidth_study.csv                # bandwidth study
+    measurement_noise_study.csv        # measurement-noise study
+    barrier_study.csv                  # barrier-depth study
+    combined_metrics.csv               # all four, tagged by 'study'
+    run_parameters.json                # resolved run parameters
+  figures/
+    01_state_vs_time.png  02_state_histogram.png
+    03_{poly,rbf}_feature_traces.png
+    04_{poly,rbf}_dm_coordinate_vs_state.png
+    05_{poly,rbf}_pca_coordinate_vs_state.png
+    06_{poly,rbf}_dm_embedding_scatter.png
+    07_{poly,rbf}_pca_embedding_scatter.png
+    08_alpha_study.png    09_bandwidth_study.png
+    10_noise_study.png    11_barrier_study.png
+    12_alpha_spectra.png
+  _superseded/                         # outputs of the preliminary run
+\end{verbatim}
+\end{small}
+
+\end{document}

@@ -109,15 +109,19 @@ def plot_coordinate_vs_time(
 
 
 def plot_coordinate_vs_state(
-    x: np.ndarray, coordinate: np.ndarray, path: Path
+    x: np.ndarray,
+    coordinate: np.ndarray,
+    path: Path,
+    ylabel: str = r"diffusion coordinate $\psi_1$",
+    title: str = r"$\psi_1$ vs. true state $X$",
 ) -> Path:
-    """Figure 6: first diffusion coordinate versus the true latent state."""
+    """A 1-D embedding coordinate versus the true latent state."""
 
     fig, ax = plt.subplots(figsize=(5.5, 5))
     sc = ax.scatter(x, coordinate, c=x, cmap=_WELL_CMAP, s=6, alpha=0.7)
     ax.set_xlabel("true state $X$")
-    ax.set_ylabel(r"diffusion coordinate $\psi_1$")
-    ax.set_title(r"$\psi_1$ vs. true state $X$")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     fig.colorbar(sc, ax=ax, label="true state $X$")
     return _finalize(fig, path)
 
@@ -143,59 +147,169 @@ def plot_embedding_scatter(
     return _finalize(fig, path)
 
 
-def plot_performance_vs_noise(
-    metrics: pd.DataFrame, path: Path
-) -> Path:
-    """Figure 9: performance versus measurement-noise level.
+_MODEL_STYLE = {
+    "polynomial": ("#1f4e79", "o-"),
+    "rbf": ("#c0392b", "s--"),
+}
 
-    Expects columns ``measurement_noise``, ``dm_pearson``, ``dm_spearman``,
-    ``pca_pearson``, ``pca_spearman``, ``dm_well_score``, ``pca_well_score``.
-    """
 
-    df = metrics.sort_values("measurement_noise")
+def plot_performance_vs_noise(metrics: pd.DataFrame, path: Path) -> Path:
+    """Measurement-noise robustness, both observation models."""
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+    for name, grp in metrics.groupby("feature_map"):
+        grp = grp.sort_values("measurement_noise")
+        color, _ = _MODEL_STYLE.get(str(name), ("black", "o-"))
+        ax1.plot(grp["measurement_noise"], grp["dm_spearman"], "o-",
+                 color=color, label=f"DM ({name})")
+        ax1.plot(grp["measurement_noise"], grp["pca_spearman"], "s--",
+                 color=color, alpha=0.6, label=f"PCA ({name})")
+        ax2.plot(grp["measurement_noise"], grp["dm_well_score"], "o-",
+                 color=color, label=f"DM ({name})")
+        ax2.plot(grp["measurement_noise"], grp["pca_well_score"], "s--",
+                 color=color, alpha=0.6, label=f"PCA ({name})")
 
-    ax1.plot(df["measurement_noise"], df["dm_pearson"], "o-", label="DM Pearson")
-    ax1.plot(df["measurement_noise"], df["dm_spearman"], "s--", label="DM Spearman")
-    ax1.plot(df["measurement_noise"], df["pca_pearson"], "o-", label="PCA Pearson")
-    ax1.plot(df["measurement_noise"], df["pca_spearman"], "s--", label="PCA Spearman")
-    ax1.set_xlabel("measurement-noise level")
-    ax1.set_ylabel("|correlation| with $X$")
-    ax1.set_title("Correlation vs. measurement noise")
-    ax1.set_ylim(0, 1.02)
+    ax1.set_xlabel("measurement-noise level $\\eta$")
+    ax1.set_ylabel(r"$|\rho_{\mathrm{Spearman}}|$ with $X$")
+    ax1.set_title("State recovery vs. measurement noise")
+    ax1.set_ylim(0, 1.05)
     ax1.legend(fontsize=8)
 
-    ax2.plot(df["measurement_noise"], df["dm_well_score"], "o-", label="DM well acc.")
-    ax2.plot(df["measurement_noise"], df["pca_well_score"], "s--", label="PCA well acc.")
     ax2.axhline(0.5, ls=":", color="grey", lw=0.8, label="chance")
-    ax2.set_xlabel("measurement-noise level")
+    ax2.set_xlabel("measurement-noise level $\\eta$")
     ax2.set_ylabel("balanced accuracy")
     ax2.set_title("Well classification vs. measurement noise")
-    ax2.set_ylim(0.4, 1.02)
+    ax2.set_ylim(0.4, 1.05)
     ax2.legend(fontsize=8)
 
-    fig.suptitle("Performance vs. measurement noise (diffusion maps vs. PCA)")
+    fig.suptitle("Robustness to measurement noise")
     return _finalize(fig, path)
 
 
-def plot_performance_vs_epsilon(
-    metrics: pd.DataFrame, path: Path
+def plot_alpha_study(
+    metrics: pd.DataFrame, two_cluster_x: float, path: Path
 ) -> Path:
-    """Figure 10: performance versus epsilon (bandwidth) multiplier.
+    """The decisive figure: what alpha does to geometry and to dynamics."""
 
-    Expects columns ``epsilon_multiplier``, ``dm_pearson``, ``dm_spearman``,
-    ``dm_well_score``.
-    """
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    ax1, ax2, ax3 = axes
 
-    df = metrics.sort_values("epsilon_multiplier")
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.plot(df["epsilon_multiplier"], df["dm_pearson"], "o-", label="DM Pearson")
-    ax.plot(df["epsilon_multiplier"], df["dm_spearman"], "s--", label="DM Spearman")
-    ax.plot(df["epsilon_multiplier"], df["dm_well_score"], "^-", label="DM well acc.")
-    ax.set_xscale("log", base=2)
-    ax.set_xlabel(r"bandwidth multiplier ($\epsilon / \epsilon_\mathrm{default}$)")
-    ax.set_ylabel("score")
-    ax.set_title("Diffusion-map performance vs. kernel bandwidth")
-    ax.set_ylim(0, 1.02)
-    ax.legend()
+    for name, grp in metrics.groupby("feature_map"):
+        grp = grp.sort_values("alpha")
+        color, _ = _MODEL_STYLE.get(str(name), ("black", "o-"))
+        ax1.plot(grp["alpha"], grp["dm_spearman"], "o-", color=color,
+                 label=f"DM ({name})")
+        ax1.plot(grp["alpha"], grp["pca_spearman"], ":", color=color,
+                 alpha=0.6, label=f"PCA ({name})")
+        ax2.plot(grp["alpha"], grp["dm_metastability"], "o-", color=color,
+                 label=f"DM ({name})")
+        ax3.plot(grp["alpha"], grp["dm_two_cluster"], "o-", color=color,
+                 label=f"DM ({name})")
+
+    ax1.set_ylabel(r"$|\rho_{\mathrm{Spearman}}|$ with $X$")
+    ax1.set_title("Geometry: recovery of the state")
+    ax1.set_ylim(0, 1.05)
+
+    ax2.set_ylabel(r"$|r(\psi_1,\ \mathrm{sign}\,X)|$")
+    ax2.set_title("Dynamics: alignment with well membership")
+    ax2.set_ylim(0, 1.05)
+
+    ax3.axhline(two_cluster_x, ls="--", color="black", lw=1.0,
+                label=f"true state ({two_cluster_x:.2f})")
+    ax3.set_ylabel("2-cluster variance score")
+    ax3.set_title("Shape: compact two-level structure")
+    ax3.set_ylim(0, 1.05)
+
+    for ax in axes:
+        ax.set_xlabel(r"normalization exponent $\alpha$")
+        ax.axvline(0.5, ls=":", color="grey", lw=0.8)
+        ax.legend(fontsize=7)
+
+    fig.suptitle(
+        r"Effect of the anisotropic normalization $\alpha$ "
+        r"($\alpha=1/2$: density-sensitive; $\alpha=1$: density-free)"
+    )
+    return _finalize(fig, path)
+
+
+def plot_alpha_spectra(metrics: pd.DataFrame, path: Path) -> Path:
+    """Timescale gap mu_2 / mu_1 versus alpha: the spectral view of the same effect."""
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    for name, grp in metrics.groupby("feature_map"):
+        grp = grp.sort_values("alpha")
+        color, _ = _MODEL_STYLE.get(str(name), ("black", "o-"))
+        ax.plot(grp["alpha"], grp["gap_ratio_2"], "o-", color=color, label=str(name))
+    ax.axhline(4.0, ls="--", color="grey", lw=1.0,
+               label=r"$k^2$ law ($\mu_2/\mu_1=4$): 1-D interval")
+    ax.set_xlabel(r"normalization exponent $\alpha$")
+    ax.set_ylabel(r"$\mu_2/\mu_1 = (1-\lambda_2)/(1-\lambda_1)$")
+    ax.set_title("Timescale separation vs. normalization")
+    ax.set_yscale("log")
+    ax.legend(fontsize=8)
+    return _finalize(fig, path)
+
+
+def plot_bandwidth_study(metrics: pd.DataFrame, path: Path) -> Path:
+    """Performance versus bandwidth, marking numerical near-reducibility."""
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.2))
+    for name, grp in metrics.groupby("feature_map"):
+        grp = grp.sort_values("bandwidth_multiplier")
+        color, _ = _MODEL_STYLE.get(str(name), ("black", "o-"))
+        ok = ~grp["degenerate"].astype(bool)
+        bad = grp["degenerate"].astype(bool)
+
+        ax1.plot(grp["bandwidth_multiplier"][ok], grp["dm_spearman"][ok], "o-",
+                 color=color, label=f"DM ({name})")
+        if bad.any():
+            ax1.plot(grp["bandwidth_multiplier"][bad], grp["dm_spearman"][bad],
+                     "x", color=color, ms=9, mew=2,
+                     label=f"{name}: near-reducible kernel")
+        ax1.axhline(float(grp["pca_spearman"].iloc[0]), ls=":", color=color,
+                    alpha=0.7, lw=1.2)
+
+        ax2.plot(grp["bandwidth_multiplier"][ok], grp["dm_well_score"][ok], "o-",
+                 color=color, label=f"DM ({name})")
+        if bad.any():
+            ax2.plot(grp["bandwidth_multiplier"][bad], grp["dm_well_score"][bad],
+                     "x", color=color, ms=9, mew=2)
+
+    ax1.set_ylabel(r"$|\rho_{\mathrm{Spearman}}|$ with $X$")
+    ax1.set_title("State recovery vs. bandwidth\n(dotted: PCA baseline)")
+    ax2.axhline(0.5, ls=":", color="grey", lw=0.8)
+    ax2.set_ylabel("well balanced accuracy")
+    ax2.set_title("Well classification vs. bandwidth")
+    for ax in (ax1, ax2):
+        ax.set_xscale("log", base=2)
+        ax.set_xlabel(r"$\epsilon / \epsilon_{\mathrm{scan}}$")
+        ax.set_ylim(0, 1.05)
+        ax.legend(fontsize=7)
+
+    fig.suptitle("Kernel bandwidth: near-reducibility below, over-smoothing above")
+    return _finalize(fig, path)
+
+
+def plot_barrier_study(metrics: pd.DataFrame, path: Path) -> Path:
+    """Metastability recovery versus barrier depth, split by alpha."""
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
+    for ax, name in zip(axes, sorted(metrics["feature_map"].unique())):
+        sub = metrics[metrics["feature_map"] == name]
+        for alpha, grp in sub.groupby("alpha"):
+            grp = grp.sort_values("barrier_ratio")
+            ax.plot(grp["barrier_ratio"], grp["dm_metastability"], "o-",
+                    label=rf"DM $\alpha={alpha}$")
+        grp0 = sub.sort_values("barrier_ratio")
+        ax.plot(grp0["barrier_ratio"], grp0["pca_metastability"], "s:",
+                color="grey", label="PCA")
+        ax.set_xlabel(r"barrier-to-noise ratio $\Delta V / D$")
+        ax.set_title(f"{name} observations")
+        ax.legend(fontsize=8)
+    axes[0].set_ylabel(r"$|r(\psi_1,\ \mathrm{sign}\,X)|$")
+    axes[0].set_ylim(0, 1.05)
+    fig.suptitle(
+        "Deep barriers make geometry and dynamics agree; "
+        r"shallow barriers separate them"
+    )
     return _finalize(fig, path)

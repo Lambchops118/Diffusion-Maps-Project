@@ -1,0 +1,143 @@
+\begin{thebibliography}{20}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Banisch et~al.(2020)Banisch, Trstanova, Bittracher, Klus, and
+  Koltai]{banisch2017diffusion}
+Ralf Banisch, Zofia Trstanova, Andreas Bittracher, Stefan Klus, and P{\'e}ter
+  Koltai.
+\newblock Diffusion maps tailored to arbitrary non-degenerate {It\^o}
+  processes.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 48\penalty0
+  (1):\penalty0 242--265, 2020.
+\newblock Preprint: arXiv:1710.03484 [math.DS], 2017.
+
+\bibitem[Belkin and Niyogi(2003)]{belkin2003laplacian}
+Mikhail Belkin and Partha Niyogi.
+\newblock Laplacian eigenmaps for dimensionality reduction and data
+  representation.
+\newblock \emph{Neural Computation}, 15\penalty0 (6):\penalty0 1373--1396,
+  2003.
+
+\bibitem[Berry and Harlim(2016)]{berry2016variable}
+Tyrus Berry and John Harlim.
+\newblock Variable bandwidth diffusion kernels.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 40\penalty0
+  (1):\penalty0 68--96, 2016.
+
+\bibitem[Coifman and Lafon(2006)]{coifman2006diffusion}
+Ronald~R. Coifman and St{\'e}phane Lafon.
+\newblock Diffusion maps.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 21\penalty0
+  (1):\penalty0 5--30, 2006.
+
+\bibitem[Coifman et~al.(2008)Coifman, Kevrekidis, Lafon, Maggioni, and
+  Nadler]{coifman2008diffusion}
+Ronald~R. Coifman, Ioannis~G. Kevrekidis, St{\'e}phane Lafon, Mauro Maggioni,
+  and Boaz Nadler.
+\newblock Diffusion maps, reduction coordinates, and low dimensional
+  representation of stochastic systems.
+\newblock \emph{Multiscale Modeling \& Simulation}, 7\penalty0 (2):\penalty0
+  842--864, 2008.
+
+\bibitem[Fowlkes et~al.(2004)Fowlkes, Belongie, Chung, and
+  Malik]{fowlkes2004spectral}
+Charless Fowlkes, Serge Belongie, Fan Chung, and Jitendra Malik.
+\newblock Spectral grouping using the {N}ystr{\"o}m method.
+\newblock \emph{IEEE Transactions on Pattern Analysis and Machine
+  Intelligence}, 26\penalty0 (2):\penalty0 214--225, 2004.
+
+\bibitem[Harris et~al.(2020)Harris, Millman, van~der Walt,
+  et~al.]{harris2020array}
+Charles~R. Harris, K.~Jarrod Millman, St{\'e}fan~J. van~der Walt, et~al.
+\newblock Array programming with {N}um{P}y.
+\newblock \emph{Nature}, 585:\penalty0 357--362, 2020.
+
+\bibitem[Higham(2001)]{higham2001algorithmic}
+Desmond~J. Higham.
+\newblock An algorithmic introduction to numerical simulation of stochastic
+  differential equations.
+\newblock \emph{SIAM Review}, 43\penalty0 (3):\penalty0 525--546, 2001.
+
+\bibitem[Hunter(2007)]{hunter2007matplotlib}
+John~D. Hunter.
+\newblock Matplotlib: A 2{D} graphics environment.
+\newblock \emph{Computing in Science \& Engineering}, 9\penalty0 (3):\penalty0
+  90--95, 2007.
+
+\bibitem[Jolliffe(2002)]{jolliffe2002principal}
+Ian~T. Jolliffe.
+\newblock \emph{Principal Component Analysis}.
+\newblock Springer, New York, 2nd edition, 2002.
+
+\bibitem[Kloeden and Platen(1992)]{kloeden1992numerical}
+Peter~E. Kloeden and Eckhard Platen.
+\newblock \emph{Numerical Solution of Stochastic Differential Equations}.
+\newblock Springer, Berlin, 1992.
+
+\bibitem[Kramers(1940)]{kramers1940brownian}
+Hendrik~A. Kramers.
+\newblock Brownian motion in a field of force and the diffusion model of
+  chemical reactions.
+\newblock \emph{Physica}, 7\penalty0 (4):\penalty0 284--304, 1940.
+
+\bibitem[Nadler et~al.(2006)Nadler, Lafon, Coifman, and
+  Kevrekidis]{nadler2006diffusion}
+Boaz Nadler, St{\'e}phane Lafon, Ronald~R. Coifman, and Ioannis~G. Kevrekidis.
+\newblock Diffusion maps, spectral clustering and reaction coordinates of
+  dynamical systems.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 21\penalty0
+  (1):\penalty0 113--127, 2006.
+
+\bibitem[Pedregosa et~al.(2011)Pedregosa, Varoquaux, Gramfort,
+  et~al.]{pedregosa2011scikit}
+Fabian Pedregosa, Ga{\"e}l Varoquaux, Alexandre Gramfort, et~al.
+\newblock Scikit-learn: Machine learning in {P}ython.
+\newblock \emph{Journal of Machine Learning Research}, 12:\penalty0 2825--2830,
+  2011.
+
+\bibitem[P{\'e}rez-Hern{\'a}ndez et~al.(2013)P{\'e}rez-Hern{\'a}ndez, Paul,
+  Giorgino, De~Fabritiis, and No{\'e}]{perez2013identification}
+Guillermo P{\'e}rez-Hern{\'a}ndez, Fabian Paul, Toni Giorgino, Gianni
+  De~Fabritiis, and Frank No{\'e}.
+\newblock Identification of slow molecular order parameters for {M}arkov model
+  construction.
+\newblock \emph{The Journal of Chemical Physics}, 139\penalty0 (1):\penalty0
+  015102, 2013.
+
+\bibitem[Rohrdanz et~al.(2011)Rohrdanz, Zheng, Maggioni, and
+  Clementi]{rohrdanz2011determination}
+Mary~A. Rohrdanz, Wenwei Zheng, Mauro Maggioni, and Cecilia Clementi.
+\newblock Determination of reaction coordinates via locally scaled diffusion
+  map.
+\newblock \emph{The Journal of Chemical Physics}, 134\penalty0 (12):\penalty0
+  124116, 2011.
+
+\bibitem[Roweis and Saul(2000)]{roweis2000nonlinear}
+Sam~T. Roweis and Lawrence~K. Saul.
+\newblock Nonlinear dimensionality reduction by locally linear embedding.
+\newblock \emph{Science}, 290\penalty0 (5500):\penalty0 2323--2326, 2000.
+
+\bibitem[Singer(2006)]{singer2006graph}
+Amit Singer.
+\newblock From graph to manifold {L}aplacian: The convergence rate.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 21\penalty0
+  (1):\penalty0 128--134, 2006.
+
+\bibitem[Tenenbaum et~al.(2000)Tenenbaum, de~Silva, and
+  Langford]{tenenbaum2000global}
+Joshua~B. Tenenbaum, Vin de~Silva, and John~C. Langford.
+\newblock A global geometric framework for nonlinear dimensionality reduction.
+\newblock \emph{Science}, 290\penalty0 (5500):\penalty0 2319--2323, 2000.
+
+\bibitem[Virtanen et~al.(2020)Virtanen, Gommers, Oliphant,
+  et~al.]{virtanen2020scipy}
+Pauli Virtanen, Ralf Gommers, Travis~E. Oliphant, et~al.
+\newblock {SciPy} 1.0: Fundamental algorithms for scientific computing in
+  {P}ython.
+\newblock \emph{Nature Methods}, 17:\penalty0 261--272, 2020.
+
+\end{thebibliography}

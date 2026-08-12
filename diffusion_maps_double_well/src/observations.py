@@ -50,6 +50,9 @@ EXTRA_FEATURE_NAMES: tuple[str, ...] = (
     "exp(-x^2)",
 )
 
+#: Available feature maps.  See :func:`build_features`.
+FEATURE_MAPS: tuple[str, ...] = ("polynomial", "rbf")
+
 
 @dataclass(frozen=True)
 class ObservationConfig:
@@ -75,6 +78,10 @@ class ObservationConfig:
     include_extra_features: bool = True
     standardize: bool = True
     seed: int = 123
+    feature_map: str = "polynomial"
+    rbf_centers: int = 12
+    rbf_width: float = 0.35
+    rbf_range: tuple[float, float] = (-2.2, 2.2)
     feature_names: tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
@@ -87,10 +94,60 @@ class ObservationConfig:
             raise ValueError(
                 f"measurement_noise must be non-negative, got {self.measurement_noise}."
             )
+        if self.feature_map not in FEATURE_MAPS:
+            raise ValueError(
+                f"feature_map must be one of {FEATURE_MAPS}, got "
+                f"{self.feature_map!r}."
+            )
+        if self.rbf_centers < 2:
+            raise ValueError(f"rbf_centers must be >= 2, got {self.rbf_centers}.")
+        if self.rbf_width <= 0.0:
+            raise ValueError(f"rbf_width must be positive, got {self.rbf_width}.")
+
+
+def build_rbf_features(
+    x: np.ndarray,
+    n_centers: int = 12,
+    width: float = 0.35,
+    value_range: tuple[float, float] = (-2.2, 2.2),
+) -> tuple[np.ndarray, tuple[str, ...]]:
+    """Build a localized 'sensor array' encoding of the latent state.
+
+    Each channel is a Gaussian bump centred at ``c_j``,
+
+        phi_j(x) = exp(-(x - c_j)**2 / (2 * width**2)),
+
+    with the centres spread uniformly over ``value_range``.  This models a bank
+    of localized detectors, each responding only to a band of positions -- a
+    common situation in practice (spectrometers, place cells, sensor arrays).
+
+    Geometrically this is a very different object from the polynomial map.
+    States that are far apart in ``x`` excite disjoint sets of channels and are
+    therefore nearly orthogonal, so the image curve is *strongly* curved and
+    spread across many dimensions rather than lying close to a single line. Its
+    maximum-variance direction need not order the state monotonically, which
+    makes it a useful regime for comparing diffusion maps with unsupervised PCA.
+    This does not claim that every possible supervised linear projection fails.
+    """
+
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    if not np.all(np.isfinite(x)):
+        raise ValueError("Latent state x contains non-finite values.")
+
+    lo, hi = value_range
+    centers = np.linspace(lo, hi, n_centers)
+    features = np.exp(-((x[:, None] - centers[None, :]) ** 2) / (2.0 * width**2))
+    names = tuple(f"rbf({c:+.2f})" for c in centers)
+    return features, names
 
 
 def build_features(
-    x: np.ndarray, include_extra_features: bool = True
+    x: np.ndarray,
+    include_extra_features: bool = True,
+    feature_map: str = "polynomial",
+    rbf_centers: int = 12,
+    rbf_width: float = 0.35,
+    rbf_range: tuple[float, float] = (-2.2, 2.2),
 ) -> tuple[np.ndarray, tuple[str, ...]]:
     """Build the nonlinear feature matrix from the scalar latent state.
 
@@ -99,7 +156,12 @@ def build_features(
     x:
         Array of shape ``(n_samples,)`` with the latent state.
     include_extra_features:
-        Whether to append the smooth extra features.
+        Whether to append the smooth extra features (``polynomial`` map only).
+    feature_map:
+        ``"polynomial"`` for the monomial/trigonometric map, ``"rbf"`` for the
+        localized sensor-array map of :func:`build_rbf_features`.
+    rbf_centers, rbf_width, rbf_range:
+        Parameters of the ``"rbf"`` map; ignored otherwise.
 
     Returns
     -------
@@ -108,6 +170,13 @@ def build_features(
     names:
         Tuple of feature names, aligned with the columns of ``features``.
     """
+
+    if feature_map not in FEATURE_MAPS:
+        raise ValueError(
+            f"feature_map must be one of {FEATURE_MAPS}, got {feature_map!r}."
+        )
+    if feature_map == "rbf":
+        return build_rbf_features(x, rbf_centers, rbf_width, rbf_range)
 
     x = np.asarray(x, dtype=np.float64).reshape(-1)
     if not np.all(np.isfinite(x)):
@@ -154,7 +223,14 @@ def generate_observations(
         Names of the feature columns.
     """
 
-    features, feature_names = build_features(x, config.include_extra_features)
+    features, feature_names = build_features(
+        x,
+        include_extra_features=config.include_extra_features,
+        feature_map=config.feature_map,
+        rbf_centers=config.rbf_centers,
+        rbf_width=config.rbf_width,
+        rbf_range=config.rbf_range,
+    )
     n_features = features.shape[1]
 
     rng = np.random.default_rng(config.seed)

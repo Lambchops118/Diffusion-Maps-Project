@@ -27,18 +27,94 @@ from sklearn.metrics import balanced_accuracy_score
 
 @dataclass
 class ComparisonMetrics:
-    """Metrics comparing a 1-D embedding coordinate against the latent state."""
+    """Metrics comparing a 1-D embedding coordinate against the latent state.
+
+    Attributes
+    ----------
+    pearson, spearman:
+        Association with the continuous latent state ``X``; these measure
+        *geometric* recovery, i.e.\\ whether the coordinate parameterizes the
+        observation manifold.
+    well_score:
+        Balanced accuracy of a 2-means split against true well membership.
+    metastability:
+        ``|Pearson(coordinate, sign(X))|``: association with well membership
+        rather than with position.  A coordinate that merely parameterizes
+        arclength scores lower here than one that behaves like a well
+        indicator, so this separates *dynamical* from *geometric* recovery in
+        a way ``well_score`` does not.
+    two_cluster:
+        Fraction of coordinate variance explained by a 2-means partition. This
+        is a descriptive two-level score, not a formal test of bimodality: even
+        a uniform continuum can score substantially above zero.
+    n_distinct:
+        Number of distinct values the coordinate takes, as a fraction of the
+        sample size. Far below 1 indicates a disconnected or nearly reducible
+        embedding whose correlations cannot be trusted.
+    """
 
     pearson: float
     spearman: float
     well_score: float
+    metastability: float = float("nan")
+    two_cluster: float = float("nan")
+    n_distinct: float = float("nan")
 
     def as_dict(self, prefix: str = "") -> dict[str, float]:
         return {
             f"{prefix}pearson": self.pearson,
             f"{prefix}spearman": self.spearman,
             f"{prefix}well_score": self.well_score,
+            f"{prefix}metastability": self.metastability,
+            f"{prefix}two_cluster": self.two_cluster,
+            f"{prefix}n_distinct": self.n_distinct,
         }
+
+
+def two_cluster_variance_score(v: np.ndarray) -> float:
+    """Fraction of a 1-D signal's variance explained by a 2-means partition.
+
+    Returns ``1 - (within-cluster variance) / (total variance)`` using the
+    *sample-weighted* within-cluster variance, so the result is the standard
+    variance decomposition and always lies in ``[0, 1]``.
+
+    Values approaching 1 indicate two compact levels, but a high value alone is
+    not proof of a bimodal density. For example, an ideal uniform continuum on
+    an interval scores 0.75. The metric is useful only as a descriptive comparison
+    with the same score on the latent state.
+    """
+
+    v = np.asarray(v, dtype=np.float64).reshape(-1, 1)
+    total = float(v.var())
+    if total < 1e-30:
+        return 0.0
+    labels = KMeans(n_clusters=2, n_init=10, random_state=0).fit_predict(v)
+    within = 0.0
+    for c in (0, 1):
+        member = v[labels == c]
+        if member.size:
+            within += member.size * float(member.var())
+    within /= v.shape[0]
+    return float(np.clip(1.0 - within / total, 0.0, 1.0))
+
+
+def bimodality_score(v: np.ndarray) -> float:
+    """Backward-compatible alias for :func:`two_cluster_variance_score`."""
+
+    return two_cluster_variance_score(v)
+
+
+def metastability_score(embedding: np.ndarray, x: np.ndarray) -> float:
+    """``|Pearson(embedding, sign(x))|``: alignment with well membership.
+
+    A coordinate that behaves like a smoothed indicator of which well the system
+    occupies scores near 1. This is a supervised shape diagnostic, not by itself
+    a measurement of a dynamical timescale.
+    """
+
+    embedding = np.asarray(embedding, dtype=np.float64).reshape(-1)
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    return abs(_safe_pearson(embedding, np.sign(x)))
 
 
 def sign_align(embedding: np.ndarray, reference: np.ndarray) -> np.ndarray:
@@ -70,9 +146,8 @@ def _safe_spearman(a: np.ndarray, b: np.ndarray) -> float:
 def well_classification_score(embedding: np.ndarray, x: np.ndarray) -> float:
     """Balanced accuracy of separating the two wells from a 1-D coordinate.
 
-    The two metastable states induce a *bimodal* distribution of the embedding
-    coordinate, but the wells are generally not equally populated, so a fixed
-    median threshold is inappropriate.  Instead we split the 1-D coordinate into
+    The wells are generally not equally populated, so a fixed median threshold
+    is inappropriate. Instead we split the 1-D coordinate into
     two clusters with 2-means (an unsupervised, offset- and sign-invariant
     thresholding at the midpoint of the two cluster centres) and measure the
     balanced accuracy of the resulting partition against the true well
@@ -114,7 +189,17 @@ def evaluate_embedding(embedding: np.ndarray, x: np.ndarray) -> ComparisonMetric
     pearson = abs(_safe_pearson(embedding, x))
     spearman = abs(_safe_spearman(embedding, x))
     well = well_classification_score(embedding, x)
-    return ComparisonMetrics(pearson=pearson, spearman=spearman, well_score=well)
+    meta = metastability_score(embedding, x)
+    two_cluster = two_cluster_variance_score(embedding)
+    distinct = float(np.unique(np.round(embedding, 10)).size) / float(embedding.size)
+    return ComparisonMetrics(
+        pearson=pearson,
+        spearman=spearman,
+        well_score=well,
+        metastability=meta,
+        two_cluster=two_cluster,
+        n_distinct=distinct,
+    )
 
 
 def compute_pca(observations: np.ndarray, n_components: int = 5) -> tuple[np.ndarray, np.ndarray]:

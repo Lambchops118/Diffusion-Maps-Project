@@ -54,22 +54,27 @@ $$ X_{n+1} = X_n + (X_n - X_n^3)\,\Delta t + \sigma\sqrt{\Delta t}\,Z_n,
 
 The $\sqrt{\Delta t}$ scaling of the noise is the defining feature of the scheme:
 the Wiener increment over a step has variance $\Delta t$.  Configurable
-parameters: initial condition $X_0$, time step $\Delta t$, number of samples,
-process noise $\sigma$, and the RNG seed.  Defaults ($\Delta t=0.01$,
-$\sigma=0.7$, $N=3000$) produce visits to **both** wells and several transitions.
+parameters include the initial condition, fine time step, retained sample count,
+subsampling stride, process noise, and RNG seed. The defaults retain every 20th
+fine step, giving $N=3000$ observations over $T=599.8$ and 61 committed
+transitions for the fixed seed.
 
 > Implemented in [`src/simulation.py`](src/simulation.py).
 
 ## 5. High-dimensional observation model
 
-The diffusion map never sees $X$ directly.  Each scalar $x$ is first mapped to a
-nonlinear **feature vector**
+The diffusion map never sees $X$ directly. Two nonlinear feature maps are used.
+The polynomial map begins with
 
 $$ \phi(x) = \big[\,x,\; x^2,\; x^3,\; \sin x,\; \cos x,\; \sin 2x,\; \cos 2x
 \,\big] $$
 
-(optionally extended with the smooth extras $\tanh x$ and $e^{-x^2}$).  The
-feature matrix $F \in \mathbb R^{N\times m}$ is then lifted into a configurable
+(extended by default with $\tanh x$ and $e^{-x^2}$). The curved RBF sensor map is
+
+$$ \phi_j(x)=\exp\!\left[-(x-c_j)^2/(2w^2)\right], $$
+
+with 12 centers on $[-2.2,2.2]$ and $w=0.35$. The feature matrix
+$F \in \mathbb R^{N\times m}$ is then lifted into a configurable
 $d$-dimensional observation space ($10 \le d \le 20$) with a **fixed, seeded**
 random Gaussian matrix $A \in \mathbb R^{m\times d}$ and corrupted by additive
 Gaussian **measurement noise**:
@@ -79,8 +84,8 @@ $$ Y = F A + \eta\,E, \qquad E_{ij} \stackrel{\text{iid}}{\sim}\mathcal N(0,1). 
 Finally $Y$ is **column-standardized** (zero mean, unit variance) so that
 Euclidean distances are not dominated by a few high-variance coordinates.  The
 intrinsic geometry is one-dimensional (a curve parameterized by $x$) embedded
-nonlinearly in $\mathbb R^d$; the question is whether that curve survives the
-lift and the noise.
+nonlinearly in $\mathbb R^d$; the two maps test a gently bent and a strongly
+curved encoding.
 
 > Implemented in [`src/observations.py`](src/observations.py).
 
@@ -104,8 +109,9 @@ scratch** in [`src/diffusion_maps.py`](src/diffusion_maps.py):
 
    - $\alpha=0$: classical normalized graph Laplacian — sampling density
      influences the operator.
-   - $\alpha=\tfrac12$: Fokker–Planck normalization.
-   - $\alpha=1$ (**default**): Laplace–Beltrami normalization — the sampling
+   - $\alpha=\tfrac12$ (**default**): density-sensitive, Fokker–Planck-type
+     normalization in the observation manifold's induced metric.
+   - $\alpha=1$: Laplace–Beltrami normalization — the sampling
      density is divided out, so the operator approximates the Laplace–Beltrami
      operator of the underlying manifold geometry alone.
 
@@ -140,24 +146,23 @@ scratch** in [`src/diffusion_maps.py`](src/diffusion_maps.py):
 
 7. **Diffusion coordinates.**  At diffusion time $t$ the embedding is
    $\Psi_t(y_i) = \big(\lambda_1^{t}\psi_1(i),\,\lambda_2^{t}\psi_2(i),\dots\big)$.
-   The first coordinate $\psi_1$ is the slowest mode — for a metastable system
-   this is the well-indicator we are after.
+   The first coordinate $\psi_1$ is the slowest kernel mode. Whether it behaves
+   like a well indicator or a geometric coordinate depends on $\alpha$ and on
+   the observation geometry.
 
 ## 7. Bandwidth selection
 
-The bandwidth $\varepsilon$ controls locality.  Too small and the graph
-disconnects (every point is its own island); too large and all points look
-equally close (the walk mixes instantly and geometry is lost).
+The bandwidth $\varepsilon$ controls locality. Too small and the kernel becomes
+numerically nearly reducible; too large and all points look equally close.
 
-- **Automatic** (`--epsilon auto`, default): $\varepsilon$ is set to a
-  **percentile of the nonzero pairwise squared distances** (default: the
-  **median**, `--epsilon-percentile 50`).  The median keeps a healthy fraction
-  of neighbours at $O(1)$ affinity and is a standard, robust, scale-free
-  heuristic.
+- **Scan** (`--epsilon scan`, default): maximize the log-kernel-sum slope over a
+  grid constrained below by a conservative minimum-spanning-tree scale.
+- **Legacy percentile** (`--epsilon auto`): use a percentile of nonzero squared
+  distances. The median is retained for comparison but oversmooths the RBF map.
 - **Manual**: pass a positive float, e.g. `--epsilon 12.5`.
 
-The kernel-bandwidth sensitivity study sweeps
-$\{0.5,\,1.0,\,2.0\}\times\varepsilon_{\text{default}}$.
+The bandwidth study sweeps
+$\{0.25,0.5,1,2,4,8,16,32\}\times\varepsilon_{\text{scan}}$.
 
 ## 8. PCA comparison
 
@@ -171,6 +176,9 @@ one.  We compare PC1 and $\psi_1$ against the true $X$ with:
   diffusion coordinate may warp $X$ monotonically);
 - **well-classification balanced accuracy** — the 1-D coordinate is split into
   two clusters by 2-means and matched to the true well membership $\operatorname{sign}(X)$;
+- **well-indicator alignment**, $|r(\psi_1,\operatorname{sign}X)|$;
+- **two-cluster variance score**, a descriptive 2-means score that is explicitly
+  not treated as a formal test of bimodality;
 - **2-D scatter plots** of the leading two coordinates coloured by $X$.
 
 Sign ambiguity of eigenvectors / PCs is handled everywhere by either taking
@@ -233,21 +241,20 @@ automatically.
 
 ```
 outputs/
-├── figures/    # ten 300-DPI PNG figures (see §12)
-├── data/
-│   ├── time.npy, latent_state.npy         # true state X_t and time grid
-│   ├── observations.npy, features.npy     # high-D observations + features
-│   ├── latent_state.csv, observations.csv # human-readable copies
+├── figures/    # seventeen 300-DPI PNG figures
+├── data/       # latent state plus poly/RBF observations and embeddings
 └── metrics/
-    ├── noise_study.csv        # metrics vs. measurement noise
-    ├── epsilon_study.csv      # metrics vs. bandwidth multiplier
-    ├── combined_metrics.csv   # both studies, tagged by 'study'
-    └── run_parameters.json    # fully-resolved run parameters (reproducibility)
+    ├── alpha_study.csv
+    ├── bandwidth_study.csv
+    ├── measurement_noise_study.csv
+    ├── barrier_study.csv
+    ├── combined_metrics.csv
+    └── run_parameters.json
 ```
 
-Each metrics row stores: `epsilon`, `measurement_noise`, the leading
-eigenvalues (`eigenvalue_0..4`), diffusion-map Pearson/Spearman/well-score, and
-PCA Pearson/Spearman/well-score.
+Rows include the resolved bandwidth, near-unit-mode diagnostic, leading
+eigenvalues and gap ratios, state-recovery correlations, well accuracy,
+well-indicator alignment, and the descriptive two-cluster variance score.
 
 ## 12. Interpretation guide (figures)
 
@@ -255,14 +262,13 @@ PCA Pearson/Spearman/well-score.
 |---|------|------------------|
 | 1 | `01_state_vs_time.png` | $X_t$ vs time. Long dwells near $\pm 1$ with abrupt hops across $0$ ⇒ metastability. |
 | 2 | `02_state_histogram.png` | Empirical density of $X$. **Bimodal**, peaks near $\pm 1$, trough at $0$. |
-| 3 | `03_feature_traces.png` | Selected observation features vs time. Nonlinear, entangled — no single one is obviously "$X$". |
-| 4 | `04_diffusion_eigenvalues.png` | Spectrum. $\lambda_0\approx 1$ (trivial); a **spectral gap** after $\lambda_1$ signals a dominant slow mode. |
-| 5 | `05_dm_coordinate_vs_time.png` | $\psi_1$ vs time. Should mirror the well-hopping of figure 1. |
-| 6 | `06_dm_coordinate_vs_state.png` | $\psi_1$ vs true $X$. A **monotone, sigmoidal** curve (plateaus at the wells, steep through the barrier) ⇒ faithful recovery. |
-| 7 | `07_dm_embedding_scatter.png` | $(\psi_1,\psi_2)$ coloured by $X$. Colour varies **smoothly** along $\psi_1$; two clusters = two wells. |
-| 8 | `08_pca_embedding_scatter.png` | $(\mathrm{PC1},\mathrm{PC2})$ coloured by $X$. Compare separation/ordering with figure 7. |
-| 9 | `09_performance_vs_noise.png` | Correlations & well accuracy vs measurement noise. Graceful degradation; DM vs PCA gap. |
-| 10 | `10_performance_vs_epsilon.png` | DM performance vs bandwidth (log$_2$ axis). A **plateau** near $\times 1$ shows robustness; degradation at large $\varepsilon$. |
+| 3 | `03_{poly,rbf}_feature_traces.png` | Feature traces for both observation models. |
+| 4–7 | `{04..07}_{poly,rbf}_*.png` | DM/PCA coordinates and 2-D embeddings for each model. |
+| 8 | `08_alpha_study.png` | Effect of density normalization on state ordering and well-oriented shape. |
+| 9 | `09_bandwidth_study.png` | Near-reducibility at small bandwidth and oversmoothing at large bandwidth. |
+| 10 | `10_noise_study.png` | Measurement-noise robustness. |
+| 11 | `11_barrier_study.png` | Sensitivity to the barrier-to-noise ratio. |
+| 12 | `12_alpha_spectra.png` | Spectral gap ratios versus normalization. |
 
 ## 13. Computational limitations: the O(N²) wall
 
@@ -280,19 +286,15 @@ comfortably in memory.
 
 - The stationary density is clearly **bimodal** and the trajectory shows several
   **well transitions** — the metastable structure is present in the data.
-- The leading nontrivial diffusion coordinate $\psi_1$ is a **monotone function
-  of the hidden state $X$** (high $|Pearson|$, Spearman $\approx 1$) and cleanly
-  **separates the two wells** (balanced accuracy well above chance), *despite*
-  the nonlinear, noisy, high-dimensional lift — confirming the hypothesis.
-- Because the feature map here retains a strong monotone imprint of $X$, **PCA
-  is a competitive baseline**: on this problem $\psi_1$ and PC1 both recover $X$,
-  with diffusion maps typically matching or slightly edging PCA on well
-  separation and remaining robust as measurement noise grows. The diffusion map's
-  advantage is expected to widen on problems whose intrinsic manifold is more
-  strongly curved or where the linear imprint of the latent state is weaker.
-- Diffusion-map quality is **robust to the bandwidth** across the $0.5$–$2\times$
-  range, degrading only when $\varepsilon$ becomes large enough to wash out local
-  geometry.
+- Diffusion maps and PCA both order the gently bent polynomial map, while
+  diffusion maps strongly outperform PC1 on the curved RBF map.
+- $\alpha$ controls how much sampling-density information survives; its practical
+  effect is strong on the polynomial arc and weak where RBF geometry already
+  separates the wells.
+- The $\alpha=1/2$ spectrum tracks barrier-depth trends but is not claimed to be
+  the exact physical generator because the observation map changes the metric.
+- Very small bandwidths can create nearly reducible kernels with misleadingly
+  high Spearman correlation; very large bandwidths drive the method toward PCA.
 
 ## 15. Project layout
 

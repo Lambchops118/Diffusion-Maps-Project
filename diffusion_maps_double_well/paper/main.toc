@@ -1,0 +1,58 @@
+\contentsline {section}{\numberline {1}Introduction}{4}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Problem statement}{4}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Summary of findings}{4}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Relation to a preliminary configuration}{5}{subsection.1.3}%
+\contentsline {subsection}{\numberline {1.4}Outline}{5}{subsection.1.4}%
+\contentsline {section}{\numberline {2}Background and Related Work}{5}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Metastability and reaction coordinates}{5}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Diffusion maps}{6}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Positioning}{7}{subsection.2.3}%
+\contentsline {section}{\numberline {3}The Generative Model}{7}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The double-well stochastic differential equation}{7}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Kramers timescale and the design of the simulation}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Euler--Maruyama discretization and time subsampling}{8}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Two high-dimensional observation models}{8}{subsection.3.4}%
+\contentsline {paragraph}{The polynomial map ($m=9$).}{8}{section*.3}%
+\contentsline {paragraph}{The RBF sensor-array map ($m=12$).}{8}{section*.4}%
+\contentsline {subsection}{\numberline {3.5}What is identifiable}{9}{subsection.3.5}%
+\contentsline {section}{\numberline {4}Diffusion Maps}{9}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Kernel and affinity graph}{9}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Anisotropic ($\alpha $) normalization and its generator limits}{9}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Markov matrix and symmetric conjugation}{10}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Diffusion coordinates and diffusion distance}{11}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Bandwidth selection}{11}{subsection.4.5}%
+\contentsline {paragraph}{The median heuristic and why it fails.}{11}{section*.5}%
+\contentsline {paragraph}{MST-scale-constrained kernel-sum scan.}{11}{section*.6}%
+\contentsline {paragraph}{An honest caveat.}{12}{section*.7}%
+\contentsline {subsection}{\numberline {4.6}Computational complexity}{12}{subsection.4.6}%
+\contentsline {section}{\numberline {5}Baseline and Evaluation Protocol}{12}{section.5}%
+\contentsline {subsection}{\numberline {5.1}PCA baseline}{12}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Metrics}{13}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Studies}{13}{subsection.5.3}%
+\contentsline {section}{\numberline {6}Implementation and Reproducibility}{13}{section.6}%
+\contentsline {section}{\numberline {7}Results}{14}{section.7}%
+\contentsline {subsection}{\numberline {7.1}The latent trajectory and sampling adequacy}{14}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}The two observation manifolds}{15}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Q1: state recovery, and where PCA fails}{16}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Q2: normalization and observation geometry}{16}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}Spectral signatures: which operator was computed}{17}{subsection.7.5}%
+\contentsline {paragraph}{At $\alpha =1$: the $k^2$ law of an interval.}{17}{section*.16}%
+\contentsline {paragraph}{At $\alpha =1/2$: a density-sensitive timescale gap.}{17}{section*.17}%
+\contentsline {paragraph}{A heuristic check on $\alpha =0$.}{17}{section*.18}%
+\contentsline {subsection}{\numberline {7.6}Sensitivity to kernel bandwidth}{18}{subsection.7.6}%
+\contentsline {subsection}{\numberline {7.7}Sensitivity to measurement noise}{19}{subsection.7.7}%
+\contentsline {subsection}{\numberline {7.8}Sensitivity to barrier depth}{20}{subsection.7.8}%
+\contentsline {subsection}{\numberline {7.9}A metric that certifies its own failure}{21}{subsection.7.9}%
+\contentsline {section}{\numberline {8}Discussion}{22}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Answers to the two questions}{22}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Why the standard default is the wrong one here}{23}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Why the preliminary configuration was misleading}{23}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}Practical guidance}{24}{subsection.8.4}%
+\contentsline {section}{\numberline {9}Limitations and Future Work}{24}{section.9}%
+\contentsline {paragraph}{Limitations.}{24}{section*.26}%
+\contentsline {paragraph}{Future work.}{25}{section*.27}%
+\contentsline {section}{\numberline {10}Conclusion}{25}{section.10}%
+\contentsline {section}{Reproducibility Statement}{26}{section*.28}%
+\contentsline {section}{\numberline {A}Notation}{28}{appendix.A}%
+\contentsline {section}{\numberline {B}Reproducing the Degeneracy Demonstration}{28}{appendix.B}%
+\contentsline {section}{\numberline {C}Output Manifest}{29}{appendix.C}%
